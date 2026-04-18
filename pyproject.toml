@@ -8,7 +8,8 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "jax[cuda13]>=0.10.0",
+    "torchrl==0.11.1",
+    "wfcrl",
 ]
 
 [project.scripts]
@@ -18,7 +19,17 @@ wind-rl = "wind_rl:main"
 requires = ["uv_build>=0.11.5,<0.12.0"]
 build-backend = "uv_build"
 
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+wfcrl = { workspace = true }
+
 [tool.uv.workspace]
 members = [
-"."
+".",
+"packages/*"
 ]
