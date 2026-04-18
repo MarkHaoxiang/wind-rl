@@ -1,0 +1,24 @@
+[project]
+name = "wind-rl"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "jax[cuda13]>=0.10.0",
+]
+
+[project.scripts]
+wind-rl = "wind_rl:main"
+
+[build-system]
+requires = ["uv_build>=0.11.5,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.workspace]
+members = [
+"."
+]
