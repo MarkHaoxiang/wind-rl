@@ -50,7 +50,12 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         categorical_actions: bool = False,
         **kwargs: Any,
     ) -> None:
-        self._reset_policy = reset_policy
+        # Stored as a plain attribute (never a tracked submodule): as an
+        # ``nn.Module`` this env would reject a ``TensorDictModule`` assignment
+        # before ``Module.__init__`` runs, and torchrl's ``EnvBase.__getattr__``
+        # delegates to the wrapped env instead of resolving ``_modules`` -- a
+        # registered submodule would then be unreachable at reset time.
+        object.__setattr__(self, "_reset_policy", reset_policy)
         self._layout_override: torch.Tensor | None = None
         self._wind_override: tuple[float, float] | None = None
         # ``return_state=False``: torchrl's base ``_reset``/``_step`` would call
