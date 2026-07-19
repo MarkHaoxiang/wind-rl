@@ -355,3 +355,17 @@ Accept: FastFarm 3-turbine env runs a short rollout in CI-skippable slow test.
 
 Remaining open (non-blocking, revisit at M4/M5): compute/fidelity budget for the
 92-turbine sweep (FLORIS-only assumed sufficient until shown otherwise).
+
+Later additions (2026-07-19, owner):
+
+5. **Monorepo layout.** The main package moves from root `src/wind_rl/` to
+   `packages/wind-rl/src/wind_rl/` (catan-engine layout): root pyproject becomes
+   a virtual workspace coordinator (tooling + dependency groups only), each
+   package under `packages/` owns its deps/tests. §2's tree is superseded on
+   layout (module structure within the package is unchanged).
+6. **Experiment 0001 rescope.** `0001_mappo_smoke` becomes a framework for
+   training *various MARL agents* (architectures/algorithm variants) on *fixed*
+   wind-farm layouts — the fixed-layout MARL benchmark. Co-design experiments
+   start at 0002+.
+7. **mypy at maximum feasible strictness** (disallow_any_generics on; extra
+   error codes; explicit-Any minimized at third-party boundaries).
