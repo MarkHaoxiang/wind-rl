@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The workspace pins torch to a CUDA (cu130) index for linux, which would
+      # pull multi-GB CUDA wheels in CI. Neither UV_TORCH_BACKEND nor the
+      # existing marker setup can steer that in CI without changing local
+      # resolution behavior, so CI installs only the dev toolchain plus the
+      # project itself (no runtime deps) instead of a full `uv sync`.
+      - name: Install dev tooling (ruff, mypy, pytest - no torch/CUDA deps)
+        run: uv sync --only-dev
+
+      - name: Install wind-rl in editable mode (no runtime deps)
+        run: uv pip install --no-deps -e .
+
+      - name: Ruff check
+        run: uv run --no-sync ruff check src tests experiments
+
+      - name: Ruff format check
+        run: uv run --no-sync ruff format --check src tests
+
+      - name: Mypy
+        run: uv run --no-sync mypy src tests
+
+      - name: Pytest
+        run: uv run --no-sync pytest -q

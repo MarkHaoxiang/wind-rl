@@ -33,3 +33,42 @@ members = [
 ".",
 "packages/*"
 ]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11",
+    "pre-commit>=4",
+    "pydantic>=2",
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "ruff>=0.15",
+]
+
+[tool.ruff]
+extend-exclude = ["packages/wfcrl-env"]
+
+[tool.ruff.lint]
+extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
+
+[tool.mypy]
+mypy_path = ["src"]
+plugins = ["pydantic.mypy"]
+strict = true
+disallow_any_generics = false
+disallow_any_explicit = false
+warn_unreachable = true
+explicit_package_bases = true
+exclude = ["packages/wfcrl-env"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[[tool.mypy.overrides]]
+module = ["wfcrl.*", "torchrl.*", "tensordict.*", "wandb.*", "hydra.*", "matplotlib.*", "scipy.*", "tqdm.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
