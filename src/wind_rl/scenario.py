@@ -27,7 +27,9 @@ class ScenarioConfig(Config):
     min_distance_between_turbines: float = Field(gt=0)
     # When set, every reset uses this fixed wind (degrees, m/s) instead of wfcrl's
     # per-episode random sampling -- a deterministic, high-headroom regime for
-    # evaluation and smoke tests.
+    # evaluation and smoke tests. The override is applied as one (direction,
+    # speed) pair keyed on fixed_wind_direction, so fixed_wind_speed only takes
+    # effect once fixed_wind_direction is set -- speed alone cannot be fixed.
     fixed_wind_direction: float | None = None
     fixed_wind_speed: float = Field(default=8.0, gt=0)
 

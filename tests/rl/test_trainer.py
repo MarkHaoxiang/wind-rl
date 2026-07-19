@@ -5,8 +5,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from torchrl.envs.utils import ExplorationType, set_exploration_type
 
 from wind_rl.env.factory import make_env
+from wind_rl.env.windfarm import GROUP_NAME
 from wind_rl.models.mlp import MlpModelConfig, build_mlp_actor_critic
 from wind_rl.rl.mappo import PPOConfig
 from wind_rl.rl.trainer import LoggingConfig, MappoTrainer, TrainingConfig
@@ -79,7 +81,7 @@ def test_trainer_reports_loss_metrics_and_updates_weights(tmp_path: Path) -> Non
     assert changed, "training left every policy weight unchanged"
 
 
-def test_checkpoint_written_and_reloadable(tmp_path: Path) -> None:
+def test_checkpoint_reload_matches_pretrained_outputs(tmp_path: Path) -> None:
     cfg = _config()
     MappoTrainer(cfg).run()
 
@@ -90,7 +92,32 @@ def test_checkpoint_written_and_reloadable(tmp_path: Path) -> None:
     assert set(payload) == {"policy", "critic", "config"}
     assert payload["config"]["model"]["kind"] == "mlp"
 
+    # Reference: architecture from the in-memory cfg, loaded with the saved weights.
     env = make_env("train", cfg.scenario, layout=np.asarray(cfg.layout))
-    policy, critic = build_mlp_actor_critic(env, cfg.scenario, cfg.model, "cpu")
-    policy.load_state_dict(payload["policy"])
-    critic.load_state_dict(payload["critic"])
+    reference_policy, reference_critic = build_mlp_actor_critic(
+        env, cfg.scenario, cfg.model, "cpu"
+    )
+    reference_policy.load_state_dict(payload["policy"])
+    reference_critic.load_state_dict(payload["critic"])
+
+    # Fresh model rebuilt entirely from the serialized config, exercising the
+    # round trip a real reload would take.
+    reloaded_cfg = TrainingConfig.model_validate(payload["config"])
+    fresh_policy, fresh_critic = build_mlp_actor_critic(
+        env, reloaded_cfg.scenario, reloaded_cfg.model, "cpu"
+    )
+    fresh_policy.load_state_dict(payload["policy"])
+    fresh_critic.load_state_dict(payload["critic"])
+
+    obs = env.reset()
+    action_key = env.action_key
+    env.close()
+
+    with torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
+        reference_action = reference_policy(obs.clone())[action_key]
+        fresh_action = fresh_policy(obs.clone())[action_key]
+        reference_value = reference_critic(obs.clone())[GROUP_NAME, "state_value"]
+        fresh_value = fresh_critic(obs.clone())[GROUP_NAME, "state_value"]
+
+    torch.testing.assert_close(reference_action, fresh_action)
+    torch.testing.assert_close(reference_value, fresh_value)

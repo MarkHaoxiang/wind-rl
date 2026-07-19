@@ -1,11 +1,12 @@
 """0001_mappo_smoke: MAPPO walking-skeleton smoke test on a 3-turbine FLORIS row.
 
 Verdict (asserted in code): deterministic eval mean episode reward -- total farm
-power under wake steering -- rises over training. Each evaluation resets with
-freshly sampled wind (direction ~N(270, 20), Weibull speed), so a single eval
-point is noisy; the verdict therefore compares the mean of the last third of
-evaluations against the first third. PASS iff the last window strictly exceeds
-the first. Prints PASS/FAIL and exits nonzero on FAIL.
+power under wake steering -- rises over training. Wind is fixed for every reset
+(direction 270, speed 8), so eval itself is deterministic; the windowed verdict
+instead smooths noise from training stochasticity (rollout sampling, SGD) by
+comparing the mean of the last third of evaluations against the first third.
+PASS iff the last window strictly exceeds the first. Prints PASS/FAIL and exits
+nonzero on FAIL.
 """
 
 from __future__ import annotations

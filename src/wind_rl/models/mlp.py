@@ -158,6 +158,8 @@ def build_mlp_actor_critic(
 
     critic = TensorDictSequential(
         feature_module,
+        # Pools per-agent obs_vec (centralized=True); deliberately does not read
+        # the injected ("state", ...) key, so it is not state-conditioned.
         TensorDictModule(
             MultiAgentMLP(
                 n_agent_inputs=_FEATURE_DIM,
