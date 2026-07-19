@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from pydantic import TypeAdapter
 
 from wind_rl.design import (
@@ -35,7 +36,9 @@ def scenario() -> ScenarioConfig:
     )
 
 
-def _assert_feasible_batch(batch: np.ndarray, scenario: ScenarioConfig) -> None:
+def _assert_feasible_batch(
+    batch: NDArray[np.float64], scenario: ScenarioConfig
+) -> None:
     assert batch.shape == (BATCH_SIZE, scenario.n_turbines, 2)
     for layout in batch:
         assert is_feasible(layout, scenario)

@@ -8,7 +8,6 @@ consumer (the FLORIS MLP smoke experiment), so this is one small class over
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import torch
@@ -18,7 +17,9 @@ from tensordict import TensorDictBase
 from torch.nn.utils import clip_grad_norm_
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, ReplayBuffer, SamplerWithoutReplacement
+from torchrl.envs import TransformedEnv
 from torchrl.envs.utils import ExplorationType, set_exploration_type
+from wandb.sdk.wandb_run import Run
 
 from wind_rl.config import Config
 from wind_rl.design import Designer, DesignerConfig, create_designer
@@ -95,7 +96,7 @@ class MappoTrainer:
             else create_designer(cfg.designer, cfg.scenario)
         )
 
-    def _make_env(self, mode: str) -> Any:
+    def _make_env(self, mode: str) -> TransformedEnv:
         # The designer drives the train env per episode; eval stays on a fixed
         # layout so runs are comparable (evaluating on designed-per-episode
         # layouts is a later decision).
@@ -236,7 +237,7 @@ class MappoTrainer:
         return history
 
 
-def _wandb_run(cfg: TrainingConfig, settings: WindRlSettings) -> Any:
+def _wandb_run(cfg: TrainingConfig, settings: WindRlSettings) -> Run | None:
     if not cfg.logging.use_wandb or settings.wandb_mode == "disabled":
         return None
     import wandb

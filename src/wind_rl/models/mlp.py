@@ -15,7 +15,7 @@ Ports DiCoDe's ``model_type="mlp"`` path to torchrl 0.11:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, override
 
 import torch
 from tensordict.nn import InteractionType, TensorDictModule, TensorDictSequential
@@ -62,6 +62,7 @@ class _ObservationFeatures(nn.Module):
         self.wind_speed_low = wind_speed_low
         self.wind_speed_high = wind_speed_high
 
+    @override
     def forward(
         self,
         wind_direction: Tensor,
@@ -92,6 +93,7 @@ class _GaussianParams(nn.Module):
         self.net = net
         self.log_std = nn.Parameter(torch.zeros(action_dim))
 
+    @override
     def forward(self, features: Tensor) -> Tensor:
         loc = self.net(features)
         return torch.cat([loc, torch.ones_like(loc) * self.log_std], dim=-1)

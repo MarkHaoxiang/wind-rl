@@ -9,13 +9,16 @@ keyed by name (with a trailing underscore, e.g. ``"HornsRev1_"``).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 
 from wind_rl.config import Config
+
+if TYPE_CHECKING:
+    from wfcrl.environments.data_cases import FastFarmCase, FlorisCase
 
 
 class ScenarioConfig(Config):
@@ -34,7 +37,7 @@ class ScenarioConfig(Config):
     fixed_wind_speed: float = Field(default=8.0, gt=0)
 
 
-def _named_cases() -> dict[str, list[Any]]:
+def _named_cases() -> dict[str, list[FastFarmCase | FlorisCase]]:
     # Imported lazily so importing wind_rl.scenario never requires wfcrl unless
     # the real-farm registry is actually used.
     from wfcrl.environments.data_cases import named_cases_dictionary

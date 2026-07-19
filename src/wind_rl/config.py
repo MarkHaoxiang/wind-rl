@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Self
+from typing import Self
 
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, ConfigDict
@@ -15,7 +15,7 @@ class Config(BaseModel):
 
     @classmethod
     def from_raw(cls, cfg: DictConfig) -> Self:
-        container: Any = OmegaConf.to_container(cfg, resolve=True)
+        container = OmegaConf.to_container(cfg, resolve=True)
         return cls.model_validate(container)
 
     @classmethod

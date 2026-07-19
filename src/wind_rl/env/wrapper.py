@@ -25,8 +25,6 @@ priority. Precedence on reset: stored override -> tensordict field ->
 
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 import torch
 from numpy.typing import NDArray
@@ -36,6 +34,7 @@ from torchrl.envs import PettingZooWrapper
 from torchrl.envs.libs.gym import _gym_to_torchrl_spec_transform, set_gym_backend
 
 from wind_rl.design.base import LAYOUT_WEIGHTS_KEY
+from wind_rl.env.windfarm import ResetOptions
 
 
 class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
@@ -43,11 +42,11 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
 
     def __init__(
         self,
-        env: Any = None,
+        env: object | None = None,
         *,
         reset_policy: TensorDictModule | None = None,
         categorical_actions: bool = False,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> None:
         # Stored as a plain attribute (never a tracked submodule): as an
         # ``nn.Module`` this env would reject a ``TensorDictModule`` assignment
@@ -68,7 +67,9 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
             **kwargs,
         )
 
-    def set_layout_override(self, layout: torch.Tensor | NDArray[Any] | None) -> None:
+    def set_layout_override(
+        self, layout: torch.Tensor | NDArray[np.float64] | None
+    ) -> None:
         """Set (or clear, with ``None``) the ``(N, 2)`` layout used on next reset."""
         if layout is None:
             self._layout_override = None
@@ -79,7 +80,7 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         """Fix (or clear, with ``None``) the reset wind as ``(direction_deg, speed_ms)``."""
         self._wind_override = wind
 
-    def _make_specs(self, env: Any) -> None:
+    def _make_specs(self, env: object) -> None:
         super()._make_specs(env)
         # Build a proper Composite spec for the (dict-valued) global state.
         # ``set_gym_backend`` selects the gymnasium spec-conversion path.
@@ -91,7 +92,9 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
             )
         self.observation_spec["state"] = state_spec
 
-    def _resolve_layout(self, tensordict: TensorDictBase | None) -> NDArray[Any] | None:
+    def _resolve_layout(
+        self, tensordict: TensorDictBase | None
+    ) -> NDArray[np.float32] | None:
         if self._layout_override is not None:
             return self._layout_override.numpy(force=True)
         if tensordict is not None and "layout_override" in tensordict.keys():  # noqa: SIM118
@@ -113,10 +116,10 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         return state
 
     def _reset(
-        self, tensordict: TensorDictBase | None = None, **kwargs: Any
+        self, tensordict: TensorDictBase | None = None, **kwargs: object
     ) -> TensorDictBase:
         theta = self._resolve_layout(tensordict)
-        options: dict[str, Any] = {}
+        options: ResetOptions = {}
         if theta is not None:
             options["xcoords"] = theta[:, 0]
             options["ycoords"] = theta[:, 1]

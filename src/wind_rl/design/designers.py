@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import assert_never
+from typing import assert_never, override
 
 import numpy as np
 import torch
@@ -28,6 +28,7 @@ class _LayoutSource(nn.Module):
         super().__init__()
         self._designer = designer
 
+    @override
     def forward(self) -> torch.Tensor:
         layout = self._designer.generate_layout_batch(1)[0]
         return torch.as_tensor(layout, dtype=torch.float32)

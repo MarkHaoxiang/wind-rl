@@ -20,11 +20,12 @@ import math
 import os
 import shutil
 from collections import OrderedDict
-from typing import Any, Literal
+from collections.abc import Mapping
+from typing import Any, Literal, TypedDict
 
 import numpy as np
 from gymnasium import spaces
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 from wfcrl.environments.data_cases import FlorisCase
 from wfcrl.environments.registration import get_default_control, validate_case
 from wfcrl.interface import FlorisInterface
@@ -38,6 +39,15 @@ from wind_rl.scenario import ScenarioConfig
 GROUP_NAME = "turbine"
 #: Name of the environment family.
 ENV_NAME = "wfcrl"
+
+
+class ResetOptions(TypedDict, total=False):
+    """``reset(options=...)`` payload honoured by :class:`DesignableWindFarmEnv`."""
+
+    xcoords: ArrayLike
+    ycoords: ArrayLike
+    wind_direction: float
+    wind_speed: float
 
 
 class DesignableWindFarmEnv(MAWindFarmEnv):  # type: ignore[misc]
@@ -55,14 +65,14 @@ class DesignableWindFarmEnv(MAWindFarmEnv):  # type: ignore[misc]
     """
 
     # Attributes owned by the (untyped) wfcrl base, reassigned on redesign.
-    mdp: Any
-    farm_case: Any
+    mdp: WindFarmMDP
+    farm_case: FlorisCase
 
     def __init__(
         self,
         interface: type[FlorisInterface],
         farm_case: FlorisCase,
-        controls: dict[str, Any],
+        controls: dict[str, tuple[float, float, float]],
         *,
         continuous_control: bool = True,
         start_iter: int = 0,
@@ -95,7 +105,7 @@ class DesignableWindFarmEnv(MAWindFarmEnv):  # type: ignore[misc]
     def reset(
         self,
         seed: int | None = None,
-        options: dict[str, Any] | None = None,
+        options: ResetOptions | None = None,
     ) -> None:
         """Reset the environment, optionally rebuilding the MDP with new coords.
 
@@ -138,16 +148,21 @@ class DesignableWindFarmEnv(MAWindFarmEnv):  # type: ignore[misc]
         os.remove(simul_file)
         shutil.rmtree(os.path.dirname(simul_file), ignore_errors=True)
 
-    def state(self) -> dict[str, NDArray[Any]]:
+    # NDArray[Any]: wfcrl's own state keys are float64, ours ("layout") is
+    # float32 -- the merged dict is genuinely dtype-heterogeneous, so no single
+    # scalar type is honest here.
+    def state(self) -> dict[str, NDArray[Any]]:  # type: ignore[explicit-any]
         """Global state, augmented with the turbine ``"layout"``."""
         base_state = super().state()
-        state: dict[str, NDArray[Any]] = OrderedDict(base_state)
+        state: dict[str, NDArray[Any]] = OrderedDict(base_state)  # type: ignore[explicit-any]
         state["layout"] = np.stack(
             [self.mdp.farm_case.xcoords, self.mdp.farm_case.ycoords], axis=-1
         ).astype(np.float32)
         return state
 
-    def _join_actions(self, agent_actions: dict[str, Any]) -> dict[str, NDArray[Any]]:
+    def _join_actions(
+        self, agent_actions: Mapping[str, Mapping[str, ArrayLike]]
+    ) -> dict[str, NDArray[np.float32]]:
         """Assemble per-agent actions into a joint action array.
 
         Overrides the wfcrl implementation, which assigns a shape-``(1,)`` array
@@ -155,7 +170,7 @@ class DesignableWindFarmEnv(MAWindFarmEnv):  # type: ignore[misc]
         rejects that as "setting an array element with a sequence", so we flatten
         each agent's control value to a scalar explicitly.
         """
-        joint_action: dict[str, NDArray[Any]] = {
+        joint_action: dict[str, NDArray[np.float32]] = {
             control: np.zeros(self.num_turbines, dtype=np.float32)
             for control in self.mdp.controls
         }
@@ -172,7 +187,7 @@ class DesignableWindFarmEnv(MAWindFarmEnv):  # type: ignore[misc]
             )
 
 
-def _as_coord_list(coords: Any) -> list[float]:
+def _as_coord_list(coords: ArrayLike) -> list[float]:
     """Coerce coordinates to a plain ``list[float]``.
 
     FLORIS serialises the case to YAML on rebuild and cannot represent numpy
@@ -183,8 +198,8 @@ def _as_coord_list(coords: Any) -> list[float]:
 
 def build_designable_windfarm(
     scenario: ScenarioConfig,
-    xcoords: NDArray[Any] | list[float],
-    ycoords: NDArray[Any] | list[float],
+    xcoords: ArrayLike,
+    ycoords: ArrayLike,
     *,
     render: bool = False,
 ) -> DesignableWindFarmEnv:

@@ -10,9 +10,9 @@ so normalisation travels with the environment. Only the *precomputed* mode
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
 import torch
+from tensordict import TensorDictBase
 from tensordict.utils import NestedKey
 from torchrl.envs.transforms import Transform
 
@@ -67,7 +67,9 @@ class RewardNormalisation(Transform):  # type: ignore[misc]
         ) / self.scale.to(reward.device)
         return normalised
 
-    def _reset(self, tensordict: Any, tensordict_reset: Any) -> Any:
+    def _reset(
+        self, tensordict: TensorDictBase, tensordict_reset: TensorDictBase
+    ) -> TensorDictBase:
         # No per-episode state to reset in precomputed mode; a running mode would
         # (optionally) reset its accumulators here.
         return tensordict_reset

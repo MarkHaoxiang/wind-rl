@@ -8,7 +8,6 @@ the free-stream wind and per-turbine yaw are drawn as quivers.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
 import matplotlib
 
@@ -18,16 +17,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.patches import Circle
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 
 from wind_rl.scenario import ScenarioConfig
 
 
 def render_layout(
-    layout: NDArray[Any],
+    layout: ArrayLike,
     scenario: ScenarioConfig,
     *,
-    state: Mapping[str, Any] | None = None,
+    state: Mapping[str, ArrayLike] | None = None,
 ) -> NDArray[np.uint8]:
     """Render a turbine layout to an ``(H, W, 3)`` uint8 RGB array.
 

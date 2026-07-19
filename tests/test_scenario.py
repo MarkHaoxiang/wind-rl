@@ -7,7 +7,10 @@ from pydantic import ValidationError
 from wind_rl.scenario import ScenarioConfig, list_real_farms, real_farm_layout
 
 
-def _base_kwargs() -> dict[str, Any]:
+# dict[str, Any]: values span str/int/float for **-unpacking into ScenarioConfig
+# (and later corrupted with an invalid type/key by the tests below); no narrower
+# union satisfies mypy's per-parameter **kwargs check.
+def _base_kwargs() -> dict[str, Any]:  # type: ignore[explicit-any]
     return {
         "name": "s",
         "n_turbines": 4,

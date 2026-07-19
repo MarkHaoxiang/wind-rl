@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from numpy.typing import NDArray
 from pydantic import ValidationError
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 
@@ -162,10 +163,10 @@ def test_random_designer_drives_train_env_layouts() -> None:
     trainer = MappoTrainer(cfg)
     assert trainer.designer is not None
 
-    produced: list[np.ndarray] = []
+    produced: list[NDArray[np.float64]] = []
     original = trainer.designer.generate_layout_batch
 
-    def _spy(batch_size: int) -> np.ndarray:
+    def _spy(batch_size: int) -> NDArray[np.float64]:
         out = original(batch_size)
         produced.append(np.asarray(out[0]).copy())
         return out
