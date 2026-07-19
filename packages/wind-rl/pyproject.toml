@@ -1,0 +1,29 @@
+[project]
+name = "wind-rl"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "hydra-core>=1.3.4",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.4",
+    "omegaconf>=2.3.1",
+    "pettingzoo>=1.25.0",
+    "pydantic>=2",
+    "pydantic-settings>=2.14.2",
+    "torchrl==0.11.1",
+    "tqdm>=4.69.0",
+    "wandb[media]>=0.28.1",
+    "wfcrl",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.5,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+wfcrl = { workspace = true }

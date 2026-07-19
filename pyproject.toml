@@ -1,29 +1,5 @@
-[project]
-name = "wind-rl"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
-]
-requires-python = ">=3.13"
-dependencies = [
-    "hydra-core>=1.3.4",
-    "matplotlib>=3.10.8",
-    "numpy>=2.4.4",
-    "omegaconf>=2.3.1",
-    "pettingzoo>=1.25.0",
-    "pydantic>=2",
-    "pydantic-settings>=2.14.2",
-    "torchrl==0.11.1",
-    "tqdm>=4.69.0",
-    "wandb[media]>=0.28.1",
-    "wfcrl",
-]
-
-[build-system]
-requires = ["uv_build>=0.11.5,<0.12.0"]
-build-backend = "uv_build"
+[tool.uv.workspace]
+members = ["packages/*"]
 
 [tool.uv.sources]
 torch = [
@@ -33,14 +9,18 @@ torchvision = [
   { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 wfcrl = { workspace = true }
-
-[tool.uv.workspace]
-members = [
-".",
-"packages/*"
-]
+wind-rl = { workspace = true }
 
 [dependency-groups]
+# Deliberately does *not* list "wind-rl" here (unlike catan-engine's pattern
+# of listing every workspace member in dev): a virtual workspace's plain
+# `uv sync` already installs every `[tool.uv.workspace]` member (wind-rl,
+# wfcrl) regardless of dev-group membership, so `uv run python -c "import
+# wind_rl"` works at root without it. Listing it would instead make CI's
+# `uv sync --only-dev` step (see ci.yml) pull wind-rl's full dependency
+# closure -- including cu130 torch -- defeating the staged CPU-torch install
+# CI relies on. Verified empirically: `--only-dev` with wind-rl omitted here
+# installs tooling only; with it added, torch+CUDA wheels come along.
 dev = [
     "mypy>=1.11",
     "pre-commit>=4",
@@ -52,12 +32,17 @@ dev = [
 
 [tool.ruff]
 extend-exclude = ["packages/wfcrl-env"]
+# wind_rl now lives under packages/wind-rl/src, not the repo-root `src/` ruff
+# auto-detects by default; without this, isort no longer recognizes `wind_rl`
+# as first-party and re-groups import blocks (moved files must stay
+# byte-identical).
+src = ["packages/wind-rl/src"]
 
 [tool.ruff.lint]
 extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
 
 [tool.mypy]
-mypy_path = ["src"]
+mypy_path = ["packages/wind-rl/src"]
 plugins = ["pydantic.mypy"]
 strict = true
 disallow_any_generics = true
@@ -87,7 +72,7 @@ module = ["wfcrl.*", "torchrl.*", "tensordict.*", "pettingzoo.*", "wandb.*", "hy
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["packages/wind-rl/tests"]
 addopts = "-q"
 markers = [
     "sim: touches wfcrl/FLORIS (needs system MPI + FLORIS at import); run locally, excluded from CI via `-m 'not sim'`",

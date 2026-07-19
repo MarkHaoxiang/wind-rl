@@ -19,6 +19,16 @@ members = [
     "wind-rl",
 ]
 
+[manifest.dependency-groups]
+dev = [
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pre-commit", specifier = ">=4" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-xdist", specifier = ">=3" },
+    { name = "ruff", specifier = ">=0.15" },
+]
+
 [[package]]
 name = "annotated-types"
 version = "0.7.0"
@@ -2276,7 +2286,7 @@ requires-dist = [
 [[package]]
 name = "wind-rl"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "packages/wind-rl" }
 dependencies = [
     { name = "hydra-core" },
     { name = "matplotlib" },
@@ -2289,16 +2299,6 @@ dependencies = [
     { name = "tqdm" },
     { name = "wandb", extra = ["media"] },
     { name = "wfcrl" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pre-commit" },
-    { name = "pydantic" },
-    { name = "pytest" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -2314,16 +2314,6 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.69.0" },
     { name = "wandb", extras = ["media"], specifier = ">=0.28.1" },
     { name = "wfcrl", editable = "packages/wfcrl-env" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.11" },
-    { name = "pre-commit", specifier = ">=4" },
-    { name = "pydantic", specifier = ">=2" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-xdist", specifier = ">=3" },
-    { name = "ruff", specifier = ">=0.15" },
 ]
 
 [[package]]

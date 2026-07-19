@@ -44,16 +44,16 @@ jobs:
           "pydantic-settings>=2.14.2" "tqdm>=4.69.0" "wandb[media]>=0.28.1"
 
       - name: Install wind-rl (editable, no deps)
-        run: uv pip install --no-deps -e .
+        run: uv pip install --no-deps -e packages/wind-rl
 
       - name: Ruff check
-        run: uv run --no-sync ruff check src tests experiments
+        run: uv run --no-sync ruff check packages/wind-rl/src packages/wind-rl/tests experiments
 
       - name: Ruff format check
-        run: uv run --no-sync ruff format --check src tests
+        run: uv run --no-sync ruff format --check packages/wind-rl/src packages/wind-rl/tests
 
       - name: Mypy
-        run: uv run --no-sync mypy src tests
+        run: uv run --no-sync mypy packages/wind-rl/src packages/wind-rl/tests
 
       # `wfcrl` (the workspace member) needs system MPI + FLORIS, which the
       # runner does not provide, so the FLORIS-touching tests are marked `sim`

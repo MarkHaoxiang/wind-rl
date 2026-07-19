@@ -17,12 +17,14 @@ Coding style is governed by [docs/coding-guidelines.md](docs/coding-guidelines.m
 clear abstractions, strict typing IS the documentation, comments minimal and
 only on user-facing API or genuine *why*.
 
-- **uv workspace**, Python 3.13. Root package is `src/wind_rl/` (src layout).
-  `packages/wfcrl-env` is a **git submodule** (the author's WFCRL fork) —
-  never edit it.
+- **uv workspace**, Python 3.13. The root `pyproject.toml` is a virtual
+  workspace coordinator (tooling + dependency groups only, no `[project]`
+  table); the main package lives at `packages/wind-rl/src/wind_rl/` (src
+  layout, own `pyproject.toml`). `packages/wfcrl-env` is a **git submodule**
+  (the author's WFCRL fork) — never edit it.
 - All config objects are pydantic v2 (`extra="forbid"`) via the `Config` base
-  in `src/wind_rl/config.py` — a typo'd field is a `ValidationError`, not a
-  silent no-op.
+  in `packages/wind-rl/src/wind_rl/config.py` — a typo'd field is a
+  `ValidationError`, not a silent no-op.
 - **Commit frequently.** After any coherent set of related changes, commit
   without waiting to be asked. Never `git add -A` — stage specific files.
   Commit messages explain *why*, not what the diff already shows.
@@ -32,9 +34,9 @@ only on user-facing API or genuine *why*.
 Before finishing any session, run all four:
 
 ```bash
-uv run ruff check src tests experiments
-uv run ruff format --check src tests
-uv run mypy src tests
+uv run ruff check packages/wind-rl/src packages/wind-rl/tests experiments
+uv run ruff format --check packages/wind-rl/src packages/wind-rl/tests
+uv run mypy packages/wind-rl/src packages/wind-rl/tests
 uv run pytest -q
 ```
 
@@ -47,12 +49,21 @@ torch/torchvision are pinned to the `pytorch-cu130` index (`[tool.uv.sources]`
 in `pyproject.toml`). A full `uv sync` on CI would pull multi-GB CUDA wheels, so
 CI installs sequentially instead (`.github/workflows/ci.yml`): `uv sync
 --only-dev`, then a **CPU** torch (`--index-url .../whl/cpu`), then `torchrl` and
-the pure-Python runtime deps, then an editable `--no-deps` install of the
-project. This leaves local resolution untouched (no `pyproject`/`uv.lock`
-change) while giving CI a real torch + numpy so **`mypy src tests` (strict) and
-`pytest` genuinely run** — CI now catches torch-dependent breakage. Caveat: the
-CPU index may serve a torch/tensordict slightly newer than the locked CUDA pin,
-so CI validates a near-but-not-identical stack; the locked stack runs locally.
+the pure-Python runtime deps, then an editable `--no-deps` install of
+`packages/wind-rl`. This leaves local resolution untouched (no `pyproject`/
+`uv.lock` change) while giving CI a real torch + numpy so **`mypy
+packages/wind-rl/{src,tests}` (strict) and `pytest` genuinely run** — CI now
+catches torch-dependent breakage. Caveat: the CPU index may serve a
+torch/tensordict slightly newer than the locked CUDA pin, so CI validates a
+near-but-not-identical stack; the locked stack runs locally.
+
+Root `dependency-groups.dev` deliberately does **not** list `wind-rl` as a
+workspace member (unlike a plain catan-engine-style copy): a virtual
+workspace's plain `uv sync` already installs every `[tool.uv.workspace]`
+member regardless of dev-group membership, so `import wind_rl` works at root
+without it. Listing it would make CI's `uv sync --only-dev` step also pull
+wind-rl's full dependency closure — including cu130 torch — defeating the
+staged CPU-torch install above.
 
 CI's pytest is scoped to `-m "not sim"`. Tests marked `sim` import `wfcrl` (the
 workspace member), which needs system MPI + FLORIS the runner lacks; they are
@@ -85,7 +96,7 @@ editing the file itself.
 ## No hardcoded paths
 
 Never hardcode a working directory, checkpoint path, or wandb setting. Use
-`WindRlSettings` (`src/wind_rl/experiment/settings.py`), overridable via
+`WindRlSettings` (`packages/wind-rl/src/wind_rl/experiment/settings.py`), overridable via
 `WIND_RL_*` environment variables (e.g. `WIND_RL_WDIR`, `WIND_RL_WANDB_MODE`).
 This is a direct fix for DiCoDe's hardcoded `~/.diffusion_co_design`.
 

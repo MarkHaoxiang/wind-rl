@@ -6,16 +6,16 @@ repos:
         entry: uv run ruff check --fix
         language: system
         types: [python]
-        files: ^(src|tests|experiments)/
+        files: ^(packages/wind-rl/(src|tests)|experiments)/
       - id: ruff-format
         name: ruff-format
         entry: uv run ruff format
         language: system
         types: [python]
-        files: ^(src|tests|experiments)/
+        files: ^(packages/wind-rl/(src|tests)|experiments)/
       - id: mypy
         name: mypy
-        entry: uv run mypy src tests
+        entry: uv run mypy packages/wind-rl/src packages/wind-rl/tests
         language: system
         types: [python]
         pass_filenames: false
