@@ -81,16 +81,17 @@ stretch experiment. **Owner: confirm which is the paper's C4.**
 
 ## 2. Code architecture
 
-Design within the **existing uv workspace**. Root package is `src/wind_rl/`
-(src layout, `uv_build` backend — already configured). `packages/wfcrl-env` is
-the author's fork (submodule) consumed as a library. `experiments/` holds
-numbered frameworks following the physics-informed-flow-map convention:
-`NNNN_slug/run.py` + `conf/`, `report.md`, append-only `JOURNAL.md`.
+Design within the **uv workspace**. The root pyproject is a virtual workspace
+coordinator; the main package is `packages/wind-rl/` (src layout).
+`packages/wfcrl-env` is the author's fork (submodule) consumed as a library.
+`experiments/` holds numbered frameworks following the
+physics-informed-flow-map convention: `NNNN_slug/run.py` + `conf/`,
+`report.md`, append-only `JOURNAL.md`.
 
 ### `wind_rl` package submodule tree (one-line responsibilities)
 
 ```
-src/wind_rl/
+packages/wind-rl/src/wind_rl/
   config.py          # pydantic v2 Config base (extra="forbid") + OmegaConf/Hydra
                      #   override merge — the "pydra" pattern. Discriminated-union
                      #   configs for designer/model/scenario.
@@ -353,19 +354,15 @@ Accept: FastFarm 3-turbine env runs a short rollout in CI-skippable slow test.
    drops out of the critical path; comparisons under our own infra can come later.
    Build the method first.
 
-Remaining open (non-blocking, revisit at M4/M5): compute/fidelity budget for the
-92-turbine sweep (FLORIS-only assumed sufficient until shown otherwise).
-
-Later additions (2026-07-19, owner):
-
-5. **Monorepo layout.** The main package moves from root `src/wind_rl/` to
-   `packages/wind-rl/src/wind_rl/` (catan-engine layout): root pyproject becomes
-   a virtual workspace coordinator (tooling + dependency groups only), each
-   package under `packages/` owns its deps/tests. §2's tree is superseded on
-   layout (module structure within the package is unchanged).
-6. **Experiment 0001 rescope.** `0001_mappo_smoke` becomes a framework for
-   training *various MARL agents* (architectures/algorithm variants) on *fixed*
-   wind-farm layouts — the fixed-layout MARL benchmark. Co-design experiments
-   start at 0002+.
+5. **Monorepo layout.** The main package lives at `packages/wind-rl/src/wind_rl/`
+   (catan-engine layout): the root pyproject is a virtual workspace coordinator
+   (tooling + dependency groups only); each package under `packages/` owns its
+   dependencies and tests.
+6. **Experiment 0001 is the fixed-layout MARL benchmark**: training various MARL
+   agents (architectures/algorithm variants) on fixed wind-farm layouts.
+   Co-design experiments start at 0002+.
 7. **mypy at maximum feasible strictness** (disallow_any_generics on; extra
    error codes; explicit-Any minimized at third-party boundaries).
+
+Remaining open (non-blocking, revisit at M4/M5): compute/fidelity budget for the
+92-turbine sweep (FLORIS-only assumed sufficient until shown otherwise).
