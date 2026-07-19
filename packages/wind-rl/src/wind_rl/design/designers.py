@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import assert_never, override
 
 import numpy as np
@@ -16,6 +17,7 @@ from wind_rl.design.base import (
     Designer,
     DesignerConfig,
     FixedDesignerConfig,
+    FlowMapDesignerConfig,
     ManualDesignerConfig,
     RandomDesignerConfig,
 )
@@ -88,6 +90,53 @@ class ManualDesigner(FixedDesigner):
         super().__init__(real_farm_layout(farm))
 
 
+class FlowMapDesigner:
+    """Samples layouts from a trained flow-map prior, few-step, then projects to
+    feasibility (hard SLSQP). No critic guidance yet -- unconditional prior only."""
+
+    def __init__(
+        self,
+        scenario: ScenarioConfig,
+        checkpoint: Path,
+        sampling_steps: int,
+        device: str = "cpu",
+    ) -> None:
+        # Imported lazily: wind_rl.generative imports wind_rl.design.geometry, so a
+        # module-level import here would cycle through the design package __init__.
+        from wind_rl.generative.flowmap import load_flowmap
+
+        self._scenario = scenario
+        self._model = load_flowmap(str(checkpoint), device=device)
+        if self._model.arch.n_turbines != scenario.n_turbines:
+            raise ValueError(
+                f"checkpoint prior has {self._model.arch.n_turbines} turbines, "
+                f"scenario {scenario.name!r} has {scenario.n_turbines}"
+            )
+        self._steps = sampling_steps
+        self._total_nfe = 0
+
+    def generate_layout_batch(self, batch_size: int) -> NDArray[np.float64]:
+        from wind_rl.generative.constraints import project_slsqp
+        from wind_rl.generative.flowmap import sample_layouts
+
+        raw = sample_layouts(self._model, batch_size, self._steps)
+        # One velocity evaluation per Euler step, independent of batch size.
+        self._total_nfe += self._steps
+        return project_slsqp(raw, self._scenario)
+
+    def update(self, sampling_td: TensorDict) -> None:
+        return None
+
+    def to_td_module(self) -> TensorDictModule:
+        return _live_layout_module(self)
+
+    def get_logs(self) -> dict[str, float]:
+        return {
+            "nfe_per_batch": float(self._steps),
+            "total_nfe": float(self._total_nfe),
+        }
+
+
 def create_designer(cfg: DesignerConfig, scenario: ScenarioConfig) -> Designer:
     match cfg:
         case RandomDesignerConfig():
@@ -97,5 +146,7 @@ def create_designer(cfg: DesignerConfig, scenario: ScenarioConfig) -> Designer:
             return FixedDesigner(sample_feasible_layout(scenario, rng))
         case ManualDesignerConfig():
             return ManualDesigner(cfg.farm)
+        case FlowMapDesignerConfig():
+            return FlowMapDesigner(scenario, cfg.checkpoint, cfg.sampling_steps)
         case _:
             assert_never(cfg)

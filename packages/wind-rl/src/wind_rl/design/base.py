@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Literal, Protocol, runtime_checkable
 
 import numpy as np
@@ -50,7 +51,16 @@ class ManualDesignerConfig(Config):
     farm: str
 
 
+class FlowMapDesignerConfig(Config):
+    kind: Literal["flow_map"] = "flow_map"
+    checkpoint: Path
+    sampling_steps: int = Field(default=4, ge=1, le=8)
+
+
 DesignerConfig = Annotated[
-    RandomDesignerConfig | FixedDesignerConfig | ManualDesignerConfig,
+    RandomDesignerConfig
+    | FixedDesignerConfig
+    | ManualDesignerConfig
+    | FlowMapDesignerConfig,
     Field(discriminator="kind"),
 ]
