@@ -14,7 +14,8 @@ pytest.importorskip("wfcrl")
 from wind_rl.design import RandomDesignerConfig
 from wind_rl.env.factory import make_env
 from wind_rl.env.windfarm import GROUP_NAME
-from wind_rl.models.mlp import MlpModelConfig, build_mlp_actor_critic
+from wind_rl.models import build_actor_critic
+from wind_rl.models.mlp import MlpModelConfig
 from wind_rl.rl.mappo import PPOConfig
 from wind_rl.rl.trainer import (
     LoggingConfig,
@@ -75,7 +76,7 @@ def _wdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def _initial_policy_state(cfg: TrainingConfig) -> dict[str, torch.Tensor]:
     seed_all(cfg.seed)
     env = make_env("train", cfg.scenario, layout=np.asarray(cfg.layout))
-    policy, _ = build_mlp_actor_critic(env, cfg.scenario, cfg.model, "cpu")
+    policy, _ = build_actor_critic(env, cfg.scenario, cfg.model, "cpu")
     env.close()
     return {
         k: v.clone()
@@ -117,7 +118,7 @@ def test_checkpoint_reload_matches_pretrained_outputs(tmp_path: Path) -> None:
 
     # Reference: architecture from the in-memory cfg, loaded with the saved weights.
     env = make_env("train", cfg.scenario, layout=np.asarray(cfg.layout))
-    reference_policy, reference_critic = build_mlp_actor_critic(
+    reference_policy, reference_critic = build_actor_critic(
         env, cfg.scenario, cfg.model, "cpu"
     )
     reference_policy.load_state_dict(payload["policy"])
@@ -126,7 +127,7 @@ def test_checkpoint_reload_matches_pretrained_outputs(tmp_path: Path) -> None:
     # Fresh model rebuilt entirely from the serialized config, exercising the
     # round trip a real reload would take.
     reloaded_cfg = TrainingConfig.model_validate(payload["config"])
-    fresh_policy, fresh_critic = build_mlp_actor_critic(
+    fresh_policy, fresh_critic = build_actor_critic(
         env, reloaded_cfg.scenario, reloaded_cfg.model, "cpu"
     )
     fresh_policy.load_state_dict(payload["policy"])

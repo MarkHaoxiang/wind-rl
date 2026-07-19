@@ -1,7 +1,39 @@
-"""MLP actor/critic models for the ``turbine`` agent group."""
+"""Actor/critic models for the ``turbine`` agent group."""
 
 from __future__ import annotations
 
-from wind_rl.models.mlp import MlpModelConfig, build_mlp_actor_critic
+from typing import Annotated
 
-__all__ = ["MlpModelConfig", "build_mlp_actor_critic"]
+import torch
+from pydantic import Field
+from tensordict.nn import TensorDictSequential
+from torchrl.envs import EnvBase
+from torchrl.modules import ProbabilisticActor
+
+from wind_rl.models.gnn import GcnModelConfig, build_gcn_actor_critic
+from wind_rl.models.mlp import MlpModelConfig, build_mlp_actor_critic
+from wind_rl.scenario import ScenarioConfig
+
+ModelConfig = Annotated[MlpModelConfig | GcnModelConfig, Field(discriminator="kind")]
+
+
+def build_actor_critic(
+    env: EnvBase,
+    scenario: ScenarioConfig,
+    cfg: MlpModelConfig | GcnModelConfig,
+    device: str | torch.device,
+) -> tuple[ProbabilisticActor, TensorDictSequential]:
+    """Build the (policy, critic) pair for ``cfg``'s model kind."""
+    if isinstance(cfg, GcnModelConfig):
+        return build_gcn_actor_critic(env, scenario, cfg, device)
+    return build_mlp_actor_critic(env, scenario, cfg, device)
+
+
+__all__ = [
+    "GcnModelConfig",
+    "MlpModelConfig",
+    "ModelConfig",
+    "build_actor_critic",
+    "build_gcn_actor_critic",
+    "build_mlp_actor_critic",
+]

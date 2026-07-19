@@ -26,7 +26,8 @@ from wind_rl.design import Designer, DesignerConfig, create_designer
 from wind_rl.env.factory import make_env
 from wind_rl.env.windfarm import GROUP_NAME
 from wind_rl.experiment.settings import WindRlSettings
-from wind_rl.models.mlp import MlpModelConfig, build_mlp_actor_critic
+from wind_rl.models import ModelConfig, build_actor_critic
+from wind_rl.models.mlp import MlpModelConfig
 from wind_rl.rl.mappo import PPOConfig, build_loss_module, build_optimiser
 from wind_rl.scenario import ScenarioConfig
 from wind_rl.utils import resolve_device, seed_all
@@ -53,7 +54,7 @@ class TrainingConfig(Config):
     layout: list[list[float]] | None = None
     designer: DesignerConfig | None = None
     scenario: ScenarioConfig
-    model: MlpModelConfig = MlpModelConfig()
+    model: ModelConfig = MlpModelConfig()
     ppo: PPOConfig = PPOConfig()
     logging: LoggingConfig = LoggingConfig()
 
@@ -144,7 +145,7 @@ class MappoTrainer:
         seed_all(cfg.seed)
 
         ref_env = self._make_env("train")
-        policy, critic = build_mlp_actor_critic(
+        policy, critic = build_actor_critic(
             ref_env, cfg.scenario, cfg.model, self.device
         )
         loss_module = build_loss_module(
