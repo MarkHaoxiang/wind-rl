@@ -24,6 +24,9 @@ from wind_rl.scenario import ScenarioConfig
 _MARGIN = 1.001
 
 
+# Both projections' pairwise-distance constraint must track
+# design.geometry.pairwise_min_distance's Euclidean, closed `>=` definition --
+# feasibility verdicts elsewhere route through `is_feasible`, which calls it.
 def _min_pairwise(pos: torch.Tensor, min_d: float) -> torch.Tensor:
     n = pos.shape[1]
     dist = torch.cdist(pos, pos, p=2)

@@ -235,6 +235,8 @@ def save_flowmap(model: FlowMapModel, path: str) -> None:
 
 
 def load_flowmap(path: str, device: str = "cpu") -> FlowMapModel:
+    # weights_only=False: the checkpoint pickles a FlowMapArch dataclass alongside
+    # the state dict, and this loads only trusted, locally-produced checkpoints.
     ckpt = torch.load(path, map_location=device, weights_only=False)
     arch = ckpt["arch"]
     if not isinstance(arch, FlowMapArch):

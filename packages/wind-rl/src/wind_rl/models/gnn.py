@@ -31,15 +31,12 @@ from wind_rl.models.mlp import (
     _LOC_KEY,
     _LOG_PROB_KEY,
     _OBS_VEC_KEY,
+    _POS_SLICE,
     _SCALE_KEY,
     _VALUE_KEY,
     _feature_module,
 )
 from wind_rl.scenario import ScenarioConfig
-
-# Turbine positions are the trailing (layout_x, layout_y) entries of the shared
-# mlp feature vector; the graph is built from them.
-_POS_SLICE = slice(_FEATURE_DIM - 2, _FEATURE_DIM)
 
 
 class GcnModelConfig(Config):
@@ -102,6 +99,9 @@ class _GcnEncoder(nn.Module):
     def _adjacency(self, positions: Tensor) -> Tensor:
         if self.connectivity == "full":
             return _full_adjacency(positions)
+        # `positions` are per-axis [-1, 1] normalised (see mlp._ObservationFeatures),
+        # so cdist distances are anisotropic on a non-square map -- KNN neighbours
+        # can differ from the true metre-scale nearest neighbours. Accepted for v0.
         return _knn_adjacency(positions, self.k)
 
     @override

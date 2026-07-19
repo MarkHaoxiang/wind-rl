@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 import torch
 
+from wind_rl.models import GcnModelConfig, build_actor_critic
 from wind_rl.models.gnn import (
     _GcnCritic,
     _GcnEncoder,
@@ -13,6 +15,14 @@ from wind_rl.models.gnn import (
     _knn_adjacency,
 )
 from wind_rl.models.mlp import _FEATURE_DIM
+from wind_rl.scenario import ScenarioConfig
+from wind_rl.utils import seed_all
+
+if TYPE_CHECKING:
+    # wind_rl.rl.trainer imports wind_rl.env.windfarm, which imports wfcrl at
+    # module level -- deferred to a type-only import so this module (and its two
+    # torch-only tests below) collects without wfcrl installed.
+    from wind_rl.rl.trainer import TrainingConfig
 
 
 def _encoder() -> _GcnEncoder:
@@ -58,23 +68,13 @@ def test_knn_adjacency_matches_hand_computed_neighbours() -> None:
     torch.testing.assert_close(adjacency, expected)
 
 
-pytest.importorskip("wfcrl")
-
-from wind_rl.env.factory import make_env  # noqa: E402
-from wind_rl.models import GcnModelConfig, build_actor_critic  # noqa: E402
-from wind_rl.rl.mappo import PPOConfig  # noqa: E402
-from wind_rl.rl.trainer import (  # noqa: E402
-    LoggingConfig,
-    MappoTrainer,
-    TrainingConfig,
-)
-from wind_rl.scenario import ScenarioConfig  # noqa: E402
-from wind_rl.utils import seed_all  # noqa: E402
-
 _LAYOUT = [[252.0, 1000.0], [756.0, 1000.0], [1260.0, 1000.0]]
 
 
 def _gcn_config() -> TrainingConfig:
+    from wind_rl.rl.mappo import PPOConfig
+    from wind_rl.rl.trainer import LoggingConfig, TrainingConfig
+
     return TrainingConfig(
         experiment_name="test_gcn_trainer",
         seed=0,
@@ -103,6 +103,10 @@ def _gcn_config() -> TrainingConfig:
 def test_gcn_trainer_run_updates_a_graph_weight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    pytest.importorskip("wfcrl")
+    from wind_rl.env.factory import make_env
+    from wind_rl.rl.trainer import MappoTrainer
+
     monkeypatch.setenv("WIND_RL_WDIR", str(tmp_path))
     monkeypatch.setenv("WIND_RL_WANDB_MODE", "disabled")
     cfg = _gcn_config()

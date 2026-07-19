@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, assert_never
 
 import torch
 from pydantic import Field
@@ -24,9 +24,13 @@ def build_actor_critic(
     device: str | torch.device,
 ) -> tuple[ProbabilisticActor, TensorDictSequential]:
     """Build the (policy, critic) pair for ``cfg``'s model kind."""
-    if isinstance(cfg, GcnModelConfig):
-        return build_gcn_actor_critic(env, scenario, cfg, device)
-    return build_mlp_actor_critic(env, scenario, cfg, device)
+    match cfg:
+        case GcnModelConfig():
+            return build_gcn_actor_critic(env, scenario, cfg, device)
+        case MlpModelConfig():
+            return build_mlp_actor_critic(env, scenario, cfg, device)
+        case _:
+            assert_never(cfg)
 
 
 __all__ = [
