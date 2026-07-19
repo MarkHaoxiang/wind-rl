@@ -18,15 +18,32 @@ jobs:
         with:
           enable-cache: true
 
-      # The workspace pins torch to a CUDA (cu130) index for linux, which would
-      # pull multi-GB CUDA wheels in CI. Neither UV_TORCH_BACKEND nor the
-      # existing marker setup can steer that in CI without changing local
-      # resolution behavior, so CI installs only the dev toolchain plus the
-      # project itself (no runtime deps) instead of a full `uv sync`.
-      - name: Install dev tooling (ruff, mypy, pytest - no torch/CUDA deps)
+      # A full `uv sync` would pull torch from the CUDA index (multi-GB wheels),
+      # so CI installs sequentially instead: dev tooling, then a CPU torch, then
+      # the pure-Python runtime deps mypy/pytest actually import. This keeps
+      # local resolution untouched (no pyproject/uv.lock change).
+      #
+      # Version-skew note: the CPU index may serve a torch/tensordict slightly
+      # newer than uv.lock's CUDA pin (torchrl's range still resolves a
+      # satisfying build). CI therefore validates against a near-but-not-lock
+      # CPU stack; the locked CUDA stack is exercised locally / in pre-commit.
+      - name: Install dev tooling (ruff, mypy, pytest)
         run: uv sync --only-dev
 
-      - name: Install wind-rl in editable mode (no runtime deps)
+      - name: Install CPU torch
+        run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install torchrl (resolves against the CPU torch above)
+        run: uv pip install "torchrl==0.11.1"
+
+      - name: Install pure-Python runtime deps
+        run: >-
+          uv pip install
+          "hydra-core>=1.3.4" "matplotlib>=3.10.8" "numpy>=2.4.4"
+          "omegaconf>=2.3.1" "pettingzoo>=1.25.0" "pydantic>=2"
+          "pydantic-settings>=2.14.2" "tqdm>=4.69.0" "wandb[media]>=0.28.1"
+
+      - name: Install wind-rl (editable, no deps)
         run: uv pip install --no-deps -e .
 
       - name: Ruff check
@@ -38,5 +55,11 @@ jobs:
       - name: Mypy
         run: uv run --no-sync mypy src tests
 
-      - name: Pytest
-        run: uv run --no-sync pytest -q
+      # `wfcrl` (the workspace member) needs system MPI + FLORIS, which the
+      # runner does not provide, so the FLORIS-touching tests are marked `sim`
+      # and excluded here. They still run locally and in the pre-commit hook,
+      # where wfcrl is installed. Excluded: the full env pipeline (tests/env),
+      # model/trainer smoke runs, the designer<->env integration test, and the
+      # real-farm layout registry tests (all import `wfcrl`).
+      - name: Pytest (non-sim)
+        run: uv run --no-sync pytest -q -m "not sim"

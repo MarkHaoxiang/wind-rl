@@ -44,12 +44,21 @@ a pre-commit hook; CI (`.github/workflows/ci.yml`) runs the same gate.
 ## torch, CI, and forbidden dependencies
 
 torch/torchvision are pinned to the `pytorch-cu130` index (`[tool.uv.sources]`
-in `pyproject.toml`). A full `uv sync` on CI would pull multi-GB CUDA wheels,
-so CI installs dev tooling only (`uv sync --only-dev` + an editable, `--no-deps`
-install of the project) and runs ruff/mypy/pytest against that. **This means
-CI never imports torch and cannot catch a broken torch-dependent code path**
-— treat GPU-touching changes (models, generative, rl) as needing a local run
-before you trust them, not just green CI.
+in `pyproject.toml`). A full `uv sync` on CI would pull multi-GB CUDA wheels, so
+CI installs sequentially instead (`.github/workflows/ci.yml`): `uv sync
+--only-dev`, then a **CPU** torch (`--index-url .../whl/cpu`), then `torchrl` and
+the pure-Python runtime deps, then an editable `--no-deps` install of the
+project. This leaves local resolution untouched (no `pyproject`/`uv.lock`
+change) while giving CI a real torch + numpy so **`mypy src tests` (strict) and
+`pytest` genuinely run** — CI now catches torch-dependent breakage. Caveat: the
+CPU index may serve a torch/tensordict slightly newer than the locked CUDA pin,
+so CI validates a near-but-not-identical stack; the locked stack runs locally.
+
+CI's pytest is scoped to `-m "not sim"`. Tests marked `sim` import `wfcrl` (the
+workspace member), which needs system MPI + FLORIS the runner lacks; they are
+excluded from CI but still run locally and in the pre-commit hook (which runs
+the full `pytest -q`). Mark any new FLORIS/wfcrl-touching test `sim` and guard
+its module with `pytest.importorskip("wfcrl")` so CI collection stays green.
 
 **Never add `torch_scatter` or `torch_cluster`.** DiCoDe's manual
 `--no-build-isolation` wheel-build pain for these is exactly what this project

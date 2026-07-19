@@ -12,6 +12,10 @@ from tensordict.nn import TensorDictModule
 
 from wind_rl.config import Config
 
+#: Reset-policy output key holding the sampled ``(N, 2)`` layout; the contract
+#: between a designer's ``to_td_module`` and the env wrapper that consumes it.
+LAYOUT_WEIGHTS_KEY = ("environment_design", "layout_weights")
+
 
 @runtime_checkable
 class Designer(Protocol):

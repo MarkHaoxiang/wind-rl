@@ -4,10 +4,14 @@ import numpy as np
 import pytest
 import torch
 
+pytest.importorskip("wfcrl")
+
 from wind_rl.env.factory import make_env
 from wind_rl.env.windfarm import GROUP_NAME
 from wind_rl.models.mlp import MlpModelConfig, build_mlp_actor_critic
 from wind_rl.scenario import ScenarioConfig
+
+pytestmark = pytest.mark.sim
 
 N_TURBINES = 3
 _LAYOUT = np.array([[252.0, 1000.0], [756.0, 1000.0], [1260.0, 1000.0]])

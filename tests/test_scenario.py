@@ -47,6 +47,7 @@ def test_scenario_config_extra_field_raises() -> None:
         ScenarioConfig(**kwargs)
 
 
+@pytest.mark.sim
 def test_list_real_farms_nonempty() -> None:
     farms = list_real_farms()
     assert len(farms) > 0
@@ -54,6 +55,7 @@ def test_list_real_farms_nonempty() -> None:
     assert "HornsRev1" in farms
 
 
+@pytest.mark.sim
 def test_real_farm_layout_shape_and_finite() -> None:
     layout = real_farm_layout("Ablaincourt")
     assert layout.shape == (7, 2)
@@ -61,12 +63,14 @@ def test_real_farm_layout_shape_and_finite() -> None:
     assert np.all(np.isfinite(layout))
 
 
+@pytest.mark.sim
 def test_real_farm_layout_accepts_trailing_underscore() -> None:
     with_underscore = real_farm_layout("Ablaincourt_")
     without = real_farm_layout("Ablaincourt")
     assert np.array_equal(with_underscore, without)
 
 
+@pytest.mark.sim
 def test_real_farm_layout_unknown_raises() -> None:
     with pytest.raises(KeyError):
         real_farm_layout("NotARealFarm")

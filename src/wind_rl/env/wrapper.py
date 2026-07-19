@@ -35,8 +35,7 @@ from tensordict.nn import TensorDictModule
 from torchrl.envs import PettingZooWrapper
 from torchrl.envs.libs.gym import _gym_to_torchrl_spec_transform, set_gym_backend
 
-#: Reset-policy output key holding the sampled ``(N, 2)`` layout.
-LAYOUT_WEIGHTS_KEY = ("environment_design", "layout_weights")
+from wind_rl.design.base import LAYOUT_WEIGHTS_KEY
 
 
 class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]

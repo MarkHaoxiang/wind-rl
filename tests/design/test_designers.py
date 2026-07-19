@@ -59,6 +59,7 @@ def test_fixed_designer_is_constant_and_feasible(scenario: ScenarioConfig) -> No
         np.testing.assert_array_equal(one, layout)
 
 
+@pytest.mark.sim
 def test_manual_designer_matches_horns_rev1() -> None:
     expected = real_farm_layout("HornsRev1")
     batch = ManualDesigner("HornsRev1").generate_layout_batch(BATCH_SIZE)
@@ -87,7 +88,11 @@ def test_sample_feasible_layout_raises_when_infeasible() -> None:
     [
         (RandomDesignerConfig(seed=0), RandomDesigner),
         (FixedDesignerConfig(seed=0), FixedDesigner),
-        (ManualDesignerConfig(farm="HornsRev1"), ManualDesigner),
+        pytest.param(
+            ManualDesignerConfig(farm="HornsRev1"),
+            ManualDesigner,
+            marks=pytest.mark.sim,
+        ),
     ],
 )
 def test_create_designer_dispatches(

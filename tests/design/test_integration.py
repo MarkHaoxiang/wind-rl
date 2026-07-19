@@ -5,9 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+pytest.importorskip("wfcrl")
+
 from wind_rl.design import RandomDesigner, is_feasible
 from wind_rl.env import make_env
 from wind_rl.scenario import ScenarioConfig
+
+pytestmark = pytest.mark.sim
 
 N_TURBINES = 3
 

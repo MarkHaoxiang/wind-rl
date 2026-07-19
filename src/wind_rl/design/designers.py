@@ -12,6 +12,7 @@ from tensordict.nn import TensorDictModule
 from torch import nn
 
 from wind_rl.design.base import (
+    LAYOUT_WEIGHTS_KEY,
     Designer,
     DesignerConfig,
     FixedDesignerConfig,
@@ -19,7 +20,6 @@ from wind_rl.design.base import (
     RandomDesignerConfig,
 )
 from wind_rl.design.geometry import sample_feasible_layout
-from wind_rl.env.wrapper import LAYOUT_WEIGHTS_KEY
 from wind_rl.scenario import ScenarioConfig, real_farm_layout
 
 
