@@ -24,6 +24,7 @@ from pettingzoo.utils.conversions import aec_to_parallel
 from tensordict.nn import TensorDictModule
 from torchrl.envs import Compose, RemoveEmptySpecs, RewardSum, TransformedEnv
 
+from wind_rl.design.geometry import is_feasible
 from wind_rl.env.transforms import RewardNormalisation
 from wind_rl.env.windfarm import GROUP_NAME, build_designable_windfarm
 from wind_rl.env.wrapper import WfcrlCoDesignWrapper
@@ -82,6 +83,12 @@ def make_env(
     if coords.shape != (scenario.n_turbines, 2):
         raise ValueError(
             f"layout must have shape ({scenario.n_turbines}, 2), got {coords.shape}"
+        )
+    if layout is None and not is_feasible(coords, scenario):
+        raise ValueError(
+            f"default grid layout for scenario {scenario.name!r} is infeasible "
+            f"(min pairwise distance < {scenario.min_distance_between_turbines}); "
+            "supply an explicit layout or a designer"
         )
 
     aec_env = build_designable_windfarm(

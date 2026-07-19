@@ -11,8 +11,12 @@ import pytest
 import torch
 from torchrl.envs.utils import check_env_specs
 
+pytest.importorskip("wfcrl")
+
 from wind_rl.env import RewardNormalisation, make_env, render_layout
 from wind_rl.scenario import ScenarioConfig
+
+pytestmark = pytest.mark.sim
 
 N_TURBINES = 3
 
@@ -103,6 +107,20 @@ def test_reward_normalisation_transforms() -> None:
     identity = RewardNormalisation()
     reward = torch.tensor([3.0, -1.0])
     torch.testing.assert_close(identity._apply_transform(reward), reward)
+
+
+def test_default_layout_infeasible_scenario_raises() -> None:
+    """A min distance the default grid cannot satisfy fails fast in make_env."""
+    infeasible = ScenarioConfig(
+        name="tight",
+        n_turbines=N_TURBINES,
+        max_steps=10,
+        map_x_length=1000.0,
+        map_y_length=1000.0,
+        min_distance_between_turbines=600.0,
+    )
+    with pytest.raises(ValueError, match="infeasible"):
+        make_env("train", infeasible)
 
 
 def test_render_layout_returns_rgb(scenario: ScenarioConfig) -> None:
