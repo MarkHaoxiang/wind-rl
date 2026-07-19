@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 import torch
 from numpy.typing import NDArray
+from pydantic import model_validator
 from tensordict import TensorDictBase
 from torch.nn.utils import clip_grad_norm_
 from torchrl.collectors import SyncDataCollector
@@ -20,6 +21,7 @@ from torchrl.data import LazyTensorStorage, ReplayBuffer, SamplerWithoutReplacem
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 
 from wind_rl.config import Config
+from wind_rl.design import Designer, DesignerConfig, create_designer
 from wind_rl.env.factory import make_env
 from wind_rl.env.windfarm import GROUP_NAME
 from wind_rl.experiment.settings import WindRlSettings
@@ -48,10 +50,20 @@ class TrainingConfig(Config):
     eval_episodes: int = 4
     checkpoint_interval: int = 1
     layout: list[list[float]] | None = None
+    designer: DesignerConfig | None = None
     scenario: ScenarioConfig
     model: MlpModelConfig = MlpModelConfig()
     ppo: PPOConfig = PPOConfig()
     logging: LoggingConfig = LoggingConfig()
+
+    @model_validator(mode="after")
+    def _layout_xor_designer(self) -> TrainingConfig:
+        if self.layout is not None and self.designer is not None:
+            raise ValueError(
+                "set at most one of `layout` (fixed) or `designer` "
+                "(per-episode); a fixed layout is the fixed designer's equivalent"
+            )
+        return self
 
 
 def _layout_array(cfg: TrainingConfig) -> NDArray[np.float64] | None:
@@ -77,12 +89,26 @@ class MappoTrainer:
         self.device = resolve_device(cfg.device)
         self.checkpoint_dir = self.settings.resolved_wdir / cfg.experiment_name
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.designer: Designer | None = (
+            None
+            if cfg.designer is None
+            else create_designer(cfg.designer, cfg.scenario)
+        )
 
     def _make_env(self, mode: str) -> Any:
+        # The designer drives the train env per episode; eval stays on a fixed
+        # layout so runs are comparable (evaluating on designed-per-episode
+        # layouts is a later decision).
+        reset_policy = (
+            self.designer.to_td_module()
+            if self.designer is not None and mode == "train"
+            else None
+        )
         return make_env(
             mode,  # type: ignore[arg-type]
             self.cfg.scenario,
             layout=_layout_array(self.cfg),
+            reset_policy=reset_policy,
             device=str(self.device),
         )
 
@@ -186,6 +212,9 @@ class MappoTrainer:
                     "grad_norm": grad_norm,
                     "lr": float(optimiser.param_groups[0]["lr"]),
                 }
+                if self.designer is not None:
+                    self.designer.update(data)
+                    metrics.update(self.designer.get_logs())
                 if iteration % cfg.eval_interval == 0:
                     metrics["eval_episode_reward"] = self._eval_reward(policy)
 

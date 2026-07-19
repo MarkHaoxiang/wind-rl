@@ -5,15 +5,25 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from pydantic import ValidationError
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 
+pytest.importorskip("wfcrl")
+
+from wind_rl.design import RandomDesignerConfig
 from wind_rl.env.factory import make_env
 from wind_rl.env.windfarm import GROUP_NAME
 from wind_rl.models.mlp import MlpModelConfig, build_mlp_actor_critic
 from wind_rl.rl.mappo import PPOConfig
-from wind_rl.rl.trainer import LoggingConfig, MappoTrainer, TrainingConfig
+from wind_rl.rl.trainer import (
+    LoggingConfig,
+    MappoTrainer,
+    TrainingConfig,
+)
 from wind_rl.scenario import ScenarioConfig
 from wind_rl.utils import seed_all
+
+pytestmark = pytest.mark.sim
 
 _LAYOUT = [[252.0, 1000.0], [756.0, 1000.0], [1260.0, 1000.0]]
 
@@ -40,6 +50,18 @@ def _config() -> TrainingConfig:
         model=MlpModelConfig(num_cells=16, depth=1),
         ppo=PPOConfig(n_epochs=2, num_minibatches=2),
         logging=LoggingConfig(use_wandb=False),
+    )
+
+
+def _designer_config() -> TrainingConfig:
+    cfg = _config()
+    return cfg.model_copy(
+        update={
+            "experiment_name": "test_trainer_designer",
+            "n_iters": 1,
+            "layout": None,
+            "designer": RandomDesignerConfig(seed=0),
+        }
     )
 
 
@@ -121,3 +143,37 @@ def test_checkpoint_reload_matches_pretrained_outputs(tmp_path: Path) -> None:
 
     torch.testing.assert_close(reference_action, fresh_action)
     torch.testing.assert_close(reference_value, fresh_value)
+
+
+def test_layout_and_designer_are_mutually_exclusive() -> None:
+    base = _config()
+    with pytest.raises(ValidationError):
+        TrainingConfig(
+            **{
+                **base.model_dump(),
+                "layout": _LAYOUT,
+                "designer": {"kind": "random", "seed": 0},
+            }
+        )
+
+
+def test_random_designer_drives_train_env_layouts() -> None:
+    cfg = _designer_config()
+    trainer = MappoTrainer(cfg)
+    assert trainer.designer is not None
+
+    produced: list[np.ndarray] = []
+    original = trainer.designer.generate_layout_batch
+
+    def _spy(batch_size: int) -> np.ndarray:
+        out = original(batch_size)
+        produced.append(np.asarray(out[0]).copy())
+        return out
+
+    trainer.designer.generate_layout_batch = _spy  # type: ignore[method-assign]
+
+    history = trainer.run()
+
+    assert len(history) == cfg.n_iters
+    assert len(produced) >= 2, "designer reset policy was not invoked per episode"
+    assert any(not np.allclose(produced[0], layout) for layout in produced[1:])
