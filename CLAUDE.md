@@ -13,6 +13,10 @@ truth for the code layout, interfaces, and the owner decisions in its §5.
 
 ## Conventions
 
+Coding style is governed by [docs/coding-guidelines.md](docs/coding-guidelines.md):
+clear abstractions, strict typing IS the documentation, comments minimal and
+only on user-facing API or genuine *why*.
+
 - **uv workspace**, Python 3.13. Root package is `src/wind_rl/` (src layout,
   `uv_build` backend). `packages/wfcrl-env` is a **git submodule** (the
   author's WFCRL fork) — never edit it; it is excluded from ruff and mypy
