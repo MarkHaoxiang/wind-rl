@@ -34,3 +34,8 @@ Binding for all code in `src/`, `tests/`, and `experiments/`.
 
 - Test names state the behavior; no docstrings in tests.
 - Assert real behavior, not "runs without raising".
+- Few, sharp tests. No trivial tests (constructor-runs, is-callable,
+  shape-only when a value assertion is available).
+- Prefer invariant tests (equivariance, feasibility, determinism,
+  round-trip equality) over smoke tests. At most one end-to-end smoke
+  test per subsystem; everything else exercises one behavior.
