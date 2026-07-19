@@ -8,9 +8,8 @@ Binding for all code in `src/`, `tests/`, and `experiments/`.
   docstring that restates it.
 - Never write a comment or docstring that repeats what the name and type
   already say.
-- Prefer narrowing types (`Literal`, discriminated unions, `NDArray[np.float64]`,
-  jaxtyping-style shape conventions where adopted) over prose describing valid
-  values.
+- Prefer narrowing types (`Literal`, discriminated unions, …) over prose
+  describing valid values.
 
 ## Comments
 

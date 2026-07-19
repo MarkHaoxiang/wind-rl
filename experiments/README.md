@@ -59,12 +59,6 @@ experiment numbers instead) and don't rewrite past entries.
 
 ## Planned frameworks
 
-- **`0001_mappo_smoke`** — walking-skeleton MAPPO run: MLP policy, `FixedDesigner`,
-  2-3 turbine FLORIS. Establishes the trainer + env + logging pipeline works
-  end-to-end before any architecture or designer work (M1).
-- **architecture-benchmark suite** — an independent framework of cheap proxy
-  tasks (no full co-design loop) that gates any architecture promotion into
-  the main training pipeline: a generator harness (fit a known point-set
-  distribution) and a policy harness (supervised value regression + short
-  frozen-layout PPO). See `docs/research/2026-07-19-geometric-architectures.md`
-  §4-5 for the staged v0/v1/v2 path and the promotion gates.
+See `docs/plans/2026-07-19-wind-rl-architecture.md` (milestone roadmap) and
+`docs/research/2026-07-19-geometric-architectures.md` (staged architecture
+path and promotion gates) for what's planned.

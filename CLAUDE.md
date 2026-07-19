@@ -17,16 +17,12 @@ Coding style is governed by [docs/coding-guidelines.md](docs/coding-guidelines.m
 clear abstractions, strict typing IS the documentation, comments minimal and
 only on user-facing API or genuine *why*.
 
-- **uv workspace**, Python 3.13. Root package is `src/wind_rl/` (src layout,
-  `uv_build` backend). `packages/wfcrl-env` is a **git submodule** (the
-  author's WFCRL fork) — never edit it; it is excluded from ruff and mypy
-  scope (`extend-exclude` / `exclude` in `pyproject.toml`) and from this
-  repo's tests.
-- **Strict mypy** (`strict = true`, `pydantic.mypy` plugin) over `src` and
-  `tests`. All config objects are pydantic v2 (`extra="forbid"`) via the
-  `Config` base in `src/wind_rl/config.py` — a typo'd field is a
-  `ValidationError`, not a silent no-op.
-- **Ruff** for lint + format, scoped to `src`, `tests`, `experiments`.
+- **uv workspace**, Python 3.13. Root package is `src/wind_rl/` (src layout).
+  `packages/wfcrl-env` is a **git submodule** (the author's WFCRL fork) —
+  never edit it.
+- All config objects are pydantic v2 (`extra="forbid"`) via the `Config` base
+  in `src/wind_rl/config.py` — a typo'd field is a `ValidationError`, not a
+  silent no-op.
 - **Commit frequently.** After any coherent set of related changes, commit
   without waiting to be asked. Never `git add -A` — stage specific files.
   Commit messages explain *why*, not what the diff already shows.

@@ -1,10 +1,7 @@
 # wind-rl
 
-wind-rl scales multi-agent wind-farm layout co-design past the 16-turbine,
-diffusion-guided setup of **DiCoDe** (Li, Amir, Prorok, arXiv:2511.03100), using
-few-step **flow-map layout generators**, permutation/E(n)-equivariant
-architectures, and domain-specific fine-tuning to reach real 32/64/92-turbine
-farms.
+wind-rl scales multi-agent wind-farm layout co-design past DiCoDe's 16-turbine
+setup (Li, Amir, Prorok, arXiv:2511.03100) toward real 32/64/92-turbine farms.
 
 ## Layout
 
@@ -35,14 +32,7 @@ uv sync
 uv run pre-commit install
 ```
 
-Checks (also run in CI):
-
-```bash
-uv run ruff check src tests experiments
-uv run ruff format --check src tests
-uv run mypy src tests
-uv run pytest -q
-```
+Checks (also run in CI): see `CLAUDE.md`'s Checks section.
 
 ## Documentation
 
