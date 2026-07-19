@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
+from torchrl.envs.utils import check_env_specs
 
 from wind_rl.env import RewardNormalisation, make_env, render_layout
 from wind_rl.scenario import ScenarioConfig
@@ -73,19 +74,24 @@ def test_reset_rebuilds_mdp_with_layout(scenario: ScenarioConfig) -> None:
     )
 
 
+def test_env_specs_match_rollout_data(scenario: ScenarioConfig) -> None:
+    """The env's declared specs (dtypes, shapes, keys) match actual rollout data."""
+    env = make_env("train", scenario)
+    check_env_specs(env)
+
+
 def test_random_rollout_accumulates_reward(scenario: ScenarioConfig) -> None:
-    """A >=10 step random rollout completes and RewardSum accumulates."""
+    """RewardSum output equals the running sum of per-step rewards."""
     env = make_env("train", scenario)
     env.set_seed(0)
 
     rollout = env.rollout(12)
     assert rollout.shape[0] == 12
 
+    per_step_reward = rollout["next", "turbine", "reward"]
     episode_reward = rollout["next", "turbine", "episode_reward"]
-    first = float(episode_reward[0].mean())
-    last = float(episode_reward[-1].mean())
-    # Running sum of (generally positive power) rewards is non-decreasing.
-    assert last >= first
+    running_sum = torch.cumsum(per_step_reward, dim=0)
+    torch.testing.assert_close(episode_reward, running_sum)
 
 
 def test_reward_normalisation_transforms() -> None:

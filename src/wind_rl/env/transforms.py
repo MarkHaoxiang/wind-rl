@@ -34,8 +34,6 @@ class RewardNormalisation(Transform):  # type: ignore[misc]
     mean, std:
         Precomputed reward statistics. Pass both to enable normalisation, or
         leave either ``None`` for an identity transform.
-    in_keys, out_keys:
-        Reward keys to read/write. Default to the turbine group's reward.
     eps:
         Floor applied to ``std`` to avoid division by zero.
     """

@@ -65,21 +65,13 @@ def make_env(
     Parameters
     ----------
     mode:
-        Reserved run-mode selector (``"train"``/``"eval"``/``"reference"``).
-        Accepted for interface stability; behaviour is currently identical.
-    scenario:
-        Static farm description (turbine count, map size, spacing, steps).
+        Accepted for interface stability; behaviour is currently identical
+        across ``"train"``/``"eval"``/``"reference"``.
     layout:
-        Optional ``(N, 2)`` initial turbine coordinates. Defaults to
+        ``(N, 2)`` initial turbine coordinates. Defaults to
         :func:`default_layout`.
-    reset_policy:
-        Optional module producing ``("environment_design", "layout_weights")``;
-        when set (and no explicit override is stored) it samples the layout at
-        each reset.
     simulator:
         Only ``"floris"`` is implemented.
-    device:
-        Torch device string for the wrapped tensordicts.
     """
     if simulator != "floris":
         raise NotImplementedError(f"Unsupported simulator {simulator!r}")

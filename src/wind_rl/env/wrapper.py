@@ -96,9 +96,11 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
 
     def _state_tensordict(self) -> TensorDict:
         raw_state = self._env.state()
+        state_spec = self.observation_spec["state"]
         state = TensorDict({}, batch_size=[], device=self.device)
         for key, value in raw_state.items():
-            state.set(key, torch.as_tensor(np.asarray(value), device=self.device))
+            tensor = torch.as_tensor(np.asarray(value), device=self.device)
+            state.set(key, tensor.to(dtype=state_spec[key].dtype))
         return state
 
     def _reset(

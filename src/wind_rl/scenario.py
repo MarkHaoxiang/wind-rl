@@ -19,8 +19,6 @@ from wind_rl.config import Config
 
 
 class ScenarioConfig(Config):
-    """Static description of a wind-farm layout scenario."""
-
     name: str
     n_turbines: int = Field(ge=1)
     max_steps: int = Field(gt=0)
@@ -29,7 +27,7 @@ class ScenarioConfig(Config):
     min_distance_between_turbines: float = Field(gt=0)
 
 
-def _named_cases() -> dict[str, Any]:
+def _named_cases() -> dict[str, list[Any]]:
     # Imported lazily so importing wind_rl.scenario never requires wfcrl unless
     # the real-farm registry is actually used.
     from wfcrl.environments.data_cases import named_cases_dictionary

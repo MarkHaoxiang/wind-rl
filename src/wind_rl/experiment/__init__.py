@@ -1,1 +1,1 @@
-"""Experiment lifecycle helpers: settings, run harness, normalisation."""
+"""Process-wide experiment settings (see :mod:`wind_rl.experiment.settings`)."""

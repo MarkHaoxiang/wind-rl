@@ -34,7 +34,6 @@ def test_from_file_dotlist_override(tmp_path: Path) -> None:
     path = _write_scenario_yaml(tmp_path)
     cfg = ScenarioConfig.from_file(path, overrides=["n_turbines=8"])
     assert cfg.n_turbines == 8
-    # unrelated fields are untouched
     assert cfg.name == "test_scenario"
 
 

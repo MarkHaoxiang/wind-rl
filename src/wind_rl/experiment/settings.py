@@ -13,8 +13,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class WindRlSettings(BaseSettings):
-    """Global settings, overridable via ``WIND_RL_<FIELD>`` environment variables."""
-
     model_config = SettingsConfigDict(env_prefix="WIND_RL_", extra="forbid")
 
     wdir: Path = Path("~/.wind_rl")
