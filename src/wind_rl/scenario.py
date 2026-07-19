@@ -25,6 +25,11 @@ class ScenarioConfig(Config):
     map_x_length: float = Field(gt=0)
     map_y_length: float = Field(gt=0)
     min_distance_between_turbines: float = Field(gt=0)
+    # When set, every reset uses this fixed wind (degrees, m/s) instead of wfcrl's
+    # per-episode random sampling -- a deterministic, high-headroom regime for
+    # evaluation and smoke tests.
+    fixed_wind_direction: float | None = None
+    fixed_wind_speed: float = Field(default=8.0, gt=0)
 
 
 def _named_cases() -> dict[str, list[Any]]:

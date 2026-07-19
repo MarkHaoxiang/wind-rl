@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+import torch
+
+from wind_rl.env.factory import make_env
+from wind_rl.models.mlp import MlpModelConfig, build_mlp_actor_critic
+from wind_rl.rl.mappo import PPOConfig
+from wind_rl.rl.trainer import LoggingConfig, MappoTrainer, TrainingConfig
+from wind_rl.scenario import ScenarioConfig
+from wind_rl.utils import seed_all
+
+_LAYOUT = [[252.0, 1000.0], [756.0, 1000.0], [1260.0, 1000.0]]
+
+
+def _config() -> TrainingConfig:
+    return TrainingConfig(
+        experiment_name="test_trainer",
+        seed=0,
+        device="cpu",
+        n_iters=2,
+        frames_per_batch=48,
+        eval_interval=1,
+        eval_episodes=1,
+        checkpoint_interval=1,
+        layout=_LAYOUT,
+        scenario=ScenarioConfig(
+            name="smoke3",
+            n_turbines=3,
+            max_steps=8,
+            map_x_length=2000.0,
+            map_y_length=2000.0,
+            min_distance_between_turbines=400.0,
+        ),
+        model=MlpModelConfig(num_cells=16, depth=1),
+        ppo=PPOConfig(n_epochs=2, num_minibatches=2),
+        logging=LoggingConfig(use_wandb=False),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _wdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WIND_RL_WDIR", str(tmp_path))
+    monkeypatch.setenv("WIND_RL_WANDB_MODE", "disabled")
+
+
+def _initial_policy_state(cfg: TrainingConfig) -> dict[str, torch.Tensor]:
+    seed_all(cfg.seed)
+    env = make_env("train", cfg.scenario, layout=np.asarray(cfg.layout))
+    policy, _ = build_mlp_actor_critic(env, cfg.scenario, cfg.model, "cpu")
+    env.close()
+    return {
+        k: v.clone()
+        for k, v in policy.state_dict().items()
+        if isinstance(v, torch.Tensor)
+    }
+
+
+def test_trainer_reports_loss_metrics_and_updates_weights(tmp_path: Path) -> None:
+    cfg = _config()
+    initial = _initial_policy_state(cfg)
+
+    history = MappoTrainer(cfg).run()
+
+    assert len(history) == cfg.n_iters
+    assert all("train_episode_reward" in m for m in history)
+    assert all("eval_episode_reward" in m for m in history)
+    assert history[-1]["grad_norm"] > 0.0
+
+    final = torch.load(
+        tmp_path / cfg.experiment_name / "checkpoint_final.pt", weights_only=False
+    )["policy"]
+    changed = [
+        k for k in initial if k in final and not torch.equal(initial[k], final[k])
+    ]
+    assert changed, "training left every policy weight unchanged"
+
+
+def test_checkpoint_written_and_reloadable(tmp_path: Path) -> None:
+    cfg = _config()
+    MappoTrainer(cfg).run()
+
+    checkpoint = tmp_path / cfg.experiment_name / "checkpoint_final.pt"
+    assert checkpoint.exists()
+
+    payload = torch.load(checkpoint, weights_only=False)
+    assert set(payload) == {"policy", "critic", "config"}
+    assert payload["config"]["model"]["kind"] == "mlp"
+
+    env = make_env("train", cfg.scenario, layout=np.asarray(cfg.layout))
+    policy, critic = build_mlp_actor_critic(env, cfg.scenario, cfg.model, "cpu")
+    policy.load_state_dict(payload["policy"])
+    critic.load_state_dict(payload["critic"])

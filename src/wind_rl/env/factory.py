@@ -95,6 +95,10 @@ def make_env(
         reset_policy=reset_policy,
         device=device,
     )
+    if scenario.fixed_wind_direction is not None:
+        wrapped.set_wind_override(
+            (scenario.fixed_wind_direction, scenario.fixed_wind_speed)
+        )
 
     return TransformedEnv(
         wrapped,

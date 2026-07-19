@@ -52,6 +52,7 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
     ) -> None:
         self._reset_policy = reset_policy
         self._layout_override: torch.Tensor | None = None
+        self._wind_override: tuple[float, float] | None = None
         # ``return_state=False``: torchrl's base ``_reset``/``_step`` would call
         # ``torch.as_tensor(self.state())`` which fails on our dict-valued state.
         # We build the (Composite) state spec and inject the state ourselves.
@@ -69,6 +70,10 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
             self._layout_override = None
         else:
             self._layout_override = torch.as_tensor(layout, dtype=torch.float32)
+
+    def set_wind_override(self, wind: tuple[float, float] | None) -> None:
+        """Fix (or clear, with ``None``) the reset wind as ``(direction_deg, speed_ms)``."""
+        self._wind_override = wind
 
     def _make_specs(self, env: Any) -> None:
         super()._make_specs(env)
@@ -107,10 +112,13 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         self, tensordict: TensorDictBase | None = None, **kwargs: Any
     ) -> TensorDictBase:
         theta = self._resolve_layout(tensordict)
-        options = (
-            None if theta is None else {"xcoords": theta[:, 0], "ycoords": theta[:, 1]}
-        )
-        out = super()._reset(tensordict, options=options, **kwargs)
+        options: dict[str, Any] = {}
+        if theta is not None:
+            options["xcoords"] = theta[:, 0]
+            options["ycoords"] = theta[:, 1]
+        if self._wind_override is not None:
+            options["wind_direction"], options["wind_speed"] = self._wind_override
+        out = super()._reset(tensordict, options=options or None, **kwargs)
         out.set("state", self._state_tensordict())
         return out
 
