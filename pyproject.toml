@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "matplotlib>=3.10.8",
     "numpy>=2.4.4",
     "omegaconf>=2.3.1",
     "pydantic>=2",
@@ -70,7 +71,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["wfcrl.*", "torchrl.*", "tensordict.*", "wandb.*", "hydra.*", "matplotlib.*", "scipy.*", "tqdm.*"]
+module = ["wfcrl.*", "torchrl.*", "tensordict.*", "pettingzoo.*", "wandb.*", "hydra.*", "matplotlib.*", "scipy.*", "tqdm.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

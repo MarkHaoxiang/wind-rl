@@ -1838,6 +1838,7 @@ name = "wind-rl"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "omegaconf" },
     { name = "pydantic" },
@@ -1858,6 +1859,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "omegaconf", specifier = ">=2.3.1" },
     { name = "pydantic", specifier = ">=2" },
