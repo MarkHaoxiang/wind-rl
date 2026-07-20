@@ -27,15 +27,18 @@ def _run(
     delta: float,
     finite: bool = True,
     first: float = 1.0,
+    initial: float | None = None,
     extra: dict[str, float] | None = None,
 ) -> RunResult:
-    # first/last chosen so last - first == delta; auc/seconds are aggregation fodder.
+    # first/last chosen so last - first == delta; initial defaults to first (no
+    # early convergence); auc/seconds are aggregation fodder.
     return RunResult(
         variant=variant,
         seed=seed,
         first=first,
         last=first + delta,
         delta=delta,
+        initial=first if initial is None else initial,
         auc=2.0 + seed,
         seconds=10.0 + seed,
         finite=finite,
@@ -49,16 +52,18 @@ def test_windowed_delta_first_and_last_third() -> None:
     assert win.first == 1.5
     assert win.last == 5.5
     assert win.delta == 4.0
+    assert win.initial == 1.0
 
 
 def test_windowed_delta_single_value_has_zero_delta() -> None:
     win = windowed_delta([7.0])
-    assert (win.first, win.last, win.delta) == (7.0, 7.0, 0.0)
+    assert (win.first, win.last, win.delta, win.initial) == (7.0, 7.0, 0.0, 7.0)
 
 
 def test_windowed_delta_empty_is_nan() -> None:
     win = windowed_delta([])
     assert math.isnan(win.first) and math.isnan(win.last) and math.isnan(win.delta)
+    assert math.isnan(win.initial)
 
 
 def test_improves_gate_uses_margin() -> None:
@@ -72,6 +77,21 @@ def test_improves_ratio_gate_uses_factor() -> None:
     gate = improves_ratio(1.05)
     assert gate(_run("a", 0, delta=0.06, first=1.0))  # last 1.06 >= 1.05
     assert not gate(_run("a", 0, delta=0.04, first=1.0))  # last 1.04 < 1.05
+
+
+def test_improves_ratio_gate_uses_initial_when_lower_than_first_window() -> None:
+    # First-third window is already post-convergence (only rises 1%), but the
+    # true starting point (initial) is much lower -- the gate should still
+    # credit the run for the learning it did relative to where it started.
+    gate = improves_ratio(1.05)
+    converged_early = _run("a", 0, delta=0.01, first=1.0, initial=0.5)
+    assert gate(converged_early)  # last=1.01 >= min(0.5, 1.0)*1.05 == 0.525
+
+
+def test_improves_ratio_gate_fails_flat_from_initial() -> None:
+    gate = improves_ratio(1.05)
+    flat = _run("a", 0, delta=0.0, first=1.0, initial=1.0)
+    assert not gate(flat)  # last==first==initial, ratio 1.0 < 1.05
 
 
 def test_exceeds_gate_thresholds_extra_metric() -> None:

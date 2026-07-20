@@ -42,6 +42,9 @@ class RunResult(NamedTuple):
     first: float
     last: float
     delta: float
+    #: First logged eval value, pre-dating any learning; see
+    #: :func:`~wind_rl.experiment.verdict.windowed_delta`.
+    initial: float
     auc: float
     seconds: float
     finite: bool
@@ -108,11 +111,13 @@ def _harvest(
     extra_metrics: Sequence[str],
 ) -> RunResult:
     evals = [m[metric] for m in history if metric in m]
-    first, last, delta = windowed_delta(evals)
+    first, last, delta, initial = windowed_delta(evals)
     auc = fmean(evals) if evals else float("nan")
     finite = bool(evals) and all(isfinite(v) for m in history for v in m.values())
     extra = {name: _final(history, name) for name in extra_metrics}
-    return RunResult(variant, seed, first, last, delta, auc, seconds, finite, extra)
+    return RunResult(
+        variant, seed, first, last, delta, initial, auc, seconds, finite, extra
+    )
 
 
 def run_sweep(

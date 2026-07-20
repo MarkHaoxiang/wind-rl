@@ -15,7 +15,10 @@ harvest, wandb grouping, table, and gates live in ``wind_rl.experiment``; this
 script only composes config and asserts the benchmark verdict:
 
   (a) final eval episode power >= +10% over the zero-yaw greedy baseline, and
-  (b) final-third mean eval score >= first-third mean eval score x 1.05.
+  (b) final-third mean eval score >= run's baseline eval score x 1.05, where
+      baseline is min(first eval point, first-third mean) -- guards against a
+      first-third window that is already post-convergence (see
+      ``wind_rl.experiment.verdict.improves_ratio``).
 
 Exits nonzero iff any (variant, all seeds) FAILs either gate.
 """
@@ -38,8 +41,9 @@ from wind_rl.scenario import RealFarmConfig, resolve_real_farm
 
 _SCORE_METRIC = "eval/episode_reward_mean"
 _POWER_GAIN_METRIC = "eval/power_gain"
-#: The benchmark verdict: learn (score rises >=5% first->last third) AND steer
-#: (final eval power >=10% over the zero-yaw baseline).
+#: The benchmark verdict: learn (score rises >=5% over the run's own baseline,
+#: robust to early convergence) AND steer (final eval power >=10% over the
+#: zero-yaw baseline).
 _GATE = all_of(improves_ratio(1.05), exceeds(_POWER_GAIN_METRIC, 0.10))
 
 
