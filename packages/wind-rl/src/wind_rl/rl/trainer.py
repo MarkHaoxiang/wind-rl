@@ -268,8 +268,7 @@ class MappoTrainer:
                     "iteration": float(iteration),
                     "train/total_frames": float((iteration + 1) * cfg.frames_per_batch),
                     "optim/grad_norm": float(np.mean(grad_norms)),
-                    "optim/lr_actor": float(optimiser.param_groups[0]["lr"]),
-                    "optim/lr_critic": float(optimiser.param_groups[0]["lr"]),
+                    "optim/lr": float(optimiser.param_groups[0]["lr"]),
                 }
                 metrics.update(_rollout_metrics(data))
                 metrics.update({k: float(np.mean(v)) for k, v in diagnostics.items()})

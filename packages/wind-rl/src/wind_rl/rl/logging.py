@@ -1,13 +1,12 @@
 """wandb integration and pure PPO logging helpers for the MAPPO trainer.
 
-:func:`explained_variance` and :func:`clip_fraction` are pure and unit-tested;
-:class:`RunLogger` isolates the optional wandb dependency so the trainer stays
-runnable -- and testable -- with wandb disabled.
+:func:`explained_variance` is pure and unit-tested; :class:`RunLogger`
+isolates the optional wandb dependency so the trainer stays runnable -- and
+testable -- with wandb disabled.
 """
 
 from __future__ import annotations
 
-import math
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,17 +32,6 @@ def explained_variance(value_target: torch.Tensor, value_pred: torch.Tensor) -> 
         return 0.0
     residual_var = float((value_target - value_pred).var(unbiased=False))
     return 1.0 - residual_var / var_target
-
-
-def clip_fraction(log_ratio: torch.Tensor, clip_epsilon: float) -> float:
-    """Fraction of samples whose likelihood ratio leaves ``[1-eps, 1+eps]``.
-
-    Matches torchrl's PPO clip-fraction: the comparison is on the log-ratio
-    against ``[log(1-eps), log(1+eps)]``.
-    """
-    low, high = math.log1p(-clip_epsilon), math.log1p(clip_epsilon)
-    clipped = log_ratio.clamp(low, high)
-    return float((clipped != log_ratio).to(torch.float32).mean())
 
 
 def git_commit() -> str:
