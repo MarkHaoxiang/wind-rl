@@ -15,3 +15,8 @@ to the run/report. See `experiments/README.md` for the contract.
   PPO budget (windowed eval mlp 32.24 -> 33.51 +1.27, gcn 32.35 -> 33.23 +0.88;
   ~7 min total). No winner crowned at smoke scale. See
   `0001_fixed_layout_marl/report.md`.
+- `0001_fixed_layout_marl` (rich-telemetry rerun) — PASS — reproduces the
+  benchmark online to wandb `wind-rl` with ~34 metrics/iter; telemetry is
+  healthy (clip <2%, KL <0.005) with two honest flags (grad norm ~8x the clip
+  budget; critic explained-variance ~0 under fixed wind). 6-turbine `mlp` scale
+  probe also learns (28.82 -> 32.02 +3.20). See `0001_fixed_layout_marl/report.md`.
