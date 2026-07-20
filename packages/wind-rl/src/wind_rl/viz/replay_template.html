@@ -182,6 +182,7 @@ const reward = document.getElementById("reward");
 const rctx = reward.getContext("2d");
 const pad = { l: 46, r: 14, t: 14, b: 34 };
 let plot = { x: 0, y: 0, w: 1, h: 1 };
+let farmCss = { w: 1, h: 1 };   // CSS px (canvas.width is device px under dpr)
 
 function fitCanvas(canvas, cssHeight) {
   const dpr = window.devicePixelRatio || 1;
@@ -195,6 +196,7 @@ function fitCanvas(canvas, cssHeight) {
 
 function layoutFarm() {
   const size = fitCanvas(farm, 520);
+  farmCss = size;
   const availW = size.w - pad.l - pad.r, availH = size.h - pad.t - pad.b;
   const aspect = S.map_x / S.map_y;
   let w = availW, h = w / aspect;
@@ -207,7 +209,7 @@ const wy = (y) => plot.y + plot.h - (y / S.map_y) * plot.h;
 
 // ---- draw farm ------------------------------------------------------------
 function drawFarm(step) {
-  fctx.clearRect(0, 0, farm.width, farm.height);
+  fctx.clearRect(0, 0, farmCss.w, farmCss.h);   // CSS px: fctx is dpr-scaled
   fctx.fillStyle = "#0b0e12";
   fctx.fillRect(plot.x, plot.y, plot.w, plot.h);
 
@@ -243,7 +245,7 @@ function drawFarm(step) {
   for (let i = 0; i < S.n_turbines; i++) {
     const [x, y] = S.layout[i];
     const cx = wx(x), cy = wy(y);
-    // nacelle axis: upwind unit turned by yaw offset (see render.py)
+    // nacelle axis: upwind unit turned by yaw offset (frames: wind_rl.env.flow)
     const facing = phi - (yaw[i] * Math.PI) / 180;
     const dx = Math.sin(facing), dy = Math.cos(facing);
     fctx.strokeStyle = "#ff5252"; fctx.lineWidth = 2.5;
@@ -266,7 +268,7 @@ function drawFarm(step) {
 
 function drawWind(step) {
   const phi = (TRAJECTORY.wind_dir[step] * Math.PI) / 180;
-  // air flows towards (-sin phi, -cos phi) in map coords
+  // air flows towards (-sin phi, -cos phi) in map coords (frames: wind_rl.env.flow)
   const fdx = -Math.sin(phi), fdy = -Math.cos(phi);
   const bx = plot.x + 30, by = plot.y + 30, len = 22;
   const tx = bx + fdx * len, ty = by - fdy * len;   // canvas y is flipped

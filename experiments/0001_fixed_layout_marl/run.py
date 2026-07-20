@@ -21,11 +21,10 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-from hydra import compose, initialize_config_dir
-from omegaconf import DictConfig
 from pydantic import Field
 
 from wind_rl.config import Config
+from wind_rl.experiment.cli import compose_experiment
 from wind_rl.models import ModelConfig
 from wind_rl.rl.trainer import MappoTrainer, TrainingConfig
 
@@ -63,12 +62,6 @@ class VariantResult(NamedTuple):
     delta: float
     seconds: float
     passed: bool
-
-
-def _compose(overrides: list[str]) -> DictConfig:
-    conf_dir = str(Path(__file__).parent / "conf")
-    with initialize_config_dir(version_base=None, config_dir=conf_dir):
-        return compose(config_name="config", overrides=overrides)
 
 
 def _verdict(history: list[dict[str, float]]) -> tuple[bool, float, float]:
@@ -111,7 +104,9 @@ def _print_table(results: list[VariantResult]) -> None:
 
 
 def main() -> int:
-    cfg = ExperimentConfig.from_raw(_compose(sys.argv[1:]))
+    cfg = compose_experiment(
+        Path(__file__).parent / "conf", ExperimentConfig, sys.argv[1:]
+    )
     results = [_run_variant(name, tc) for name, tc in cfg.training_configs()]
     _print_table(results)
     all_pass = all(r.passed for r in results)

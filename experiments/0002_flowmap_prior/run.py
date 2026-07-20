@@ -16,12 +16,11 @@ import time
 from pathlib import Path
 
 import numpy as np
-from hydra import compose, initialize_config_dir
 from numpy.typing import NDArray
-from omegaconf import DictConfig
 
 from wind_rl.config import Config
 from wind_rl.design.geometry import is_feasible
+from wind_rl.experiment.cli import compose_experiment
 from wind_rl.experiment.settings import WindRlSettings
 from wind_rl.generative.constraints import project_slsqp
 from wind_rl.generative.flowmap import (
@@ -61,18 +60,14 @@ class ExperimentConfig(Config):
     verdict: VerdictCfg
 
 
-def _compose(overrides: list[str]) -> DictConfig:
-    conf_dir = str(Path(__file__).parent / "conf")
-    with initialize_config_dir(version_base=None, config_dir=conf_dir):
-        return compose(config_name="config", overrides=overrides)
-
-
 def _feasibility_rate(layouts: NDArray[np.float64], scenario: ScenarioConfig) -> float:
     return float(np.mean([is_feasible(layout, scenario) for layout in layouts]))
 
 
 def main() -> int:
-    cfg = ExperimentConfig.from_raw(_compose(sys.argv[1:]))
+    cfg = compose_experiment(
+        Path(__file__).parent / "conf", ExperimentConfig, sys.argv[1:]
+    )
     scenario = cfg.scenario
 
     arch = FlowMapArch(
