@@ -81,6 +81,8 @@ class So2ModelConfig(Config):
     embed_dim: int = Field(default=32, gt=0)
     num_layers: int = Field(default=2, ge=1)
     num_heads: int = Field(default=4, gt=0)
+    #: Feed-forward hidden width as a multiple of ``embed_dim``.
+    ff_mult: int = Field(default=2, gt=0)
     initial_std: float = 1.0
 
     @model_validator(mode="after")
@@ -194,9 +196,9 @@ class _So2Norm(nn.Module):
 
 
 class _So2FeedForward(nn.Module):
-    def __init__(self, max_m: int, embed_dim: int) -> None:
+    def __init__(self, max_m: int, embed_dim: int, ff_mult: int) -> None:
         super().__init__()
-        hidden = 2 * embed_dim
+        hidden = ff_mult * embed_dim
         self.lin_in = _So2Linear(max_m, embed_dim, hidden)
         self.lin_out = _So2Linear(max_m, hidden, embed_dim)
         self.gate = nn.Linear(hidden + max_m * hidden, max_m * hidden)
@@ -278,13 +280,13 @@ class _So2Attention(nn.Module):
 
 class _So2Block(nn.Module):
     def __init__(
-        self, max_m: int, embed_dim: int, num_heads: int, grid_size: int
+        self, max_m: int, embed_dim: int, num_heads: int, grid_size: int, ff_mult: int
     ) -> None:
         super().__init__()
         self.norm_attn = _So2Norm(max_m, embed_dim)
         self.attn = _So2Attention(max_m, embed_dim, num_heads, grid_size)
         self.norm_ff = _So2Norm(max_m, embed_dim)
-        self.ff = _So2FeedForward(max_m, embed_dim)
+        self.ff = _So2FeedForward(max_m, embed_dim, ff_mult)
 
     @override
     def forward(
@@ -300,7 +302,12 @@ class _So2Block(nn.Module):
 
 class _So2Encoder(nn.Module):
     def __init__(
-        self, max_m: int, embed_dim: int, num_layers: int, num_heads: int
+        self,
+        max_m: int,
+        embed_dim: int,
+        num_layers: int,
+        num_heads: int,
+        ff_mult: int,
     ) -> None:
         super().__init__()
         self.max_m = max_m
@@ -317,7 +324,8 @@ class _So2Encoder(nn.Module):
             nn.Linear(_RADIAL_BASIS_DIM, _RADIAL_BASIS_DIM),
         )
         self.blocks = nn.ModuleList(
-            _So2Block(max_m, embed_dim, num_heads, grid_size) for _ in range(num_layers)
+            _So2Block(max_m, embed_dim, num_heads, grid_size, ff_mult)
+            for _ in range(num_layers)
         )
         self.norm_out = _So2Norm(max_m, embed_dim)
 
@@ -390,6 +398,7 @@ def build_so2_actor_critic(
             embed_dim=cfg.embed_dim,
             num_layers=cfg.num_layers,
             num_heads=cfg.num_heads,
+            ff_mult=cfg.ff_mult,
         )
 
     policy_head = nn.Sequential(

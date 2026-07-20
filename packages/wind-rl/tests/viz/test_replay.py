@@ -61,6 +61,21 @@ def test_build_replay_html_is_standalone_and_embeds_trajectory() -> None:
     assert "src=" not in html and "<link" not in html
 
 
+def test_build_replay_html_escapes_script_breakout() -> None:
+    traj = _sample_trajectory().model_copy(
+        update={
+            "flow": ReplayFlow(
+                size=1, vmin=0.0, vmax=1.0, steps=[0], frames=["</script>"]
+            )
+        }
+    )
+    html = build_replay_html(traj)
+    # The payload's breakout is neutralised, so the only literal </script> left
+    # is the template's own closing tag; the escaped form carries the payload.
+    assert html.count("</script>") == 1
+    assert "\\u003c/script>" in html
+
+
 @pytest.mark.sim
 def test_record_episode_round_trips_with_finite_shapes() -> None:
     from wind_rl.env.factory import make_env

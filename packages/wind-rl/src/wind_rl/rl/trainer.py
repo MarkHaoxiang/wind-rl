@@ -162,16 +162,26 @@ class MappoTrainer:
 
     def _eval(self, policy: torch.nn.Module, record_replay: bool) -> _EvalResult:
         env = self._make_env("eval")
+        max_steps = self.cfg.scenario.max_steps
         rewards = []
+        replay_html: str | None = None
         with torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
-            for _ in range(self.cfg.eval_episodes):
-                rollout = env.rollout(
-                    self.cfg.scenario.max_steps, policy, break_when_any_done=True
-                )
-                rewards.append(float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean()))
+            for episode in range(self.cfg.eval_episodes):
+                is_last = episode == self.cfg.eval_episodes - 1
+                # Instrument the final eval episode for the replay instead of
+                # spending a whole extra FLORIS-heavy episode on it.
+                if record_replay and is_last:
+                    reward, replay_html = _record_last_eval_episode(
+                        env, policy, max_steps
+                    )
+                    rewards.append(reward)
+                else:
+                    rollout = env.rollout(max_steps, policy, break_when_any_done=True)
+                    rewards.append(
+                        float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean())
+                    )
         # Render the live wake-resolved flow field before the env is torn down.
         render = _render_eval(env)
-        replay_html = _record_replay(env, policy) if record_replay else None
         env.close()
         return _EvalResult(
             float(np.mean(rewards)),
@@ -356,9 +366,19 @@ def _render_eval(env: object) -> NDArray[np.uint8] | None:
         return None
 
 
-def _record_replay(env: TransformedEnv, policy: torch.nn.Module) -> str | None:
+def _record_last_eval_episode(
+    env: TransformedEnv, policy: torch.nn.Module, max_steps: int
+) -> tuple[float, str | None]:
+    """Run the final eval episode as an instrumented replay: ``(reward, html)``.
+
+    ``record_episode`` manually steps the env (reading live FLORIS per step), so
+    its terminal mean episode reward is the same metric a plain ``env.rollout``
+    would report -- no separate scoring episode is needed. Replay is best-effort
+    telemetry, so on failure it falls back to a plain rollout for the reward.
+    """
     try:
         traj = record_episode(env, policy)
-        return build_replay_html(traj)
+        return traj.cumulative_reward[-1], build_replay_html(traj)
     except Exception:  # pragma: no cover - replay is best-effort telemetry
-        return None
+        rollout = env.rollout(max_steps, policy, break_when_any_done=True)
+        return float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean()), None

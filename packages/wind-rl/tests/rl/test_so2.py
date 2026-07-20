@@ -32,7 +32,11 @@ _NUM_HEADS = 4
 def _encoder() -> _So2Encoder:
     torch.manual_seed(0)
     return _So2Encoder(
-        max_m=_MAX_M, embed_dim=_EMBED_DIM, num_layers=2, num_heads=_NUM_HEADS
+        max_m=_MAX_M,
+        embed_dim=_EMBED_DIM,
+        num_layers=2,
+        num_heads=_NUM_HEADS,
+        ff_mult=2,
     )
 
 
