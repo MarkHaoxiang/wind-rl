@@ -92,9 +92,9 @@ def test_trainer_reports_loss_metrics_and_updates_weights(tmp_path: Path) -> Non
     history = MappoTrainer(cfg).run()
 
     assert len(history) == cfg.n_iters
-    assert all("train_episode_reward" in m for m in history)
-    assert all("eval_episode_reward" in m for m in history)
-    assert history[-1]["grad_norm"] > 0.0
+    assert all("train/episode_reward_mean" in m for m in history)
+    assert all("eval/episode_reward_mean" in m for m in history)
+    assert history[-1]["optim/grad_norm"] > 0.0
 
     final = torch.load(
         tmp_path / cfg.experiment_name / "checkpoint_final.pt", weights_only=False

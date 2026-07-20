@@ -29,7 +29,7 @@ from wind_rl.config import Config
 from wind_rl.models import ModelConfig
 from wind_rl.rl.trainer import MappoTrainer, TrainingConfig
 
-_METRIC = "eval_episode_reward"
+_METRIC = "eval/episode_reward_mean"
 
 
 class VariantConfig(Config):

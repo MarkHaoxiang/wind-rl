@@ -7,7 +7,10 @@ consumer (the FLORIS MLP smoke experiment), so this is one small class over
 
 from __future__ import annotations
 
+import math
+import time
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import torch
@@ -19,14 +22,15 @@ from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, ReplayBuffer, SamplerWithoutReplacement
 from torchrl.envs import TransformedEnv
 from torchrl.envs.utils import ExplorationType, set_exploration_type
-from wandb.sdk.wandb_run import Run
 
 from wind_rl.config import Config
 from wind_rl.design import Designer, DesignerConfig, create_designer
 from wind_rl.env.factory import make_env
+from wind_rl.env.render import render_layout
 from wind_rl.experiment.settings import WindRlSettings
 from wind_rl.models import ModelConfig, build_actor_critic
 from wind_rl.models.mlp import MlpModelConfig
+from wind_rl.rl.logging import RunLogger, explained_variance
 from wind_rl.rl.mappo import PPOConfig, build_loss_module, build_optimiser
 from wind_rl.scenario import ScenarioConfig
 from wind_rl.static import GROUP_NAME
@@ -35,6 +39,10 @@ from wind_rl.utils import resolve_device, seed_all
 _REWARD_KEY = (GROUP_NAME, "reward")
 _EPISODE_REWARD_KEY = (GROUP_NAME, "episode_reward")
 _DONE_KEY = (GROUP_NAME, "done")
+_STATE_VALUE_KEY = (GROUP_NAME, "state_value")
+_SCALE_KEY = (GROUP_NAME, "scale")
+_ACTION_KEY = (GROUP_NAME, "action", "yaw")
+_GAUSSIAN_ENTROPY_CONST = 0.5 * math.log(2.0 * math.pi * math.e)
 
 
 class LoggingConfig(Config):
@@ -68,18 +76,52 @@ class TrainingConfig(Config):
         return self
 
 
+class _EvalResult(NamedTuple):
+    reward_mean: float
+    reward_std: float
+    image: NDArray[np.uint8] | None
+
+
 def _layout_array(cfg: TrainingConfig) -> NDArray[np.float64] | None:
     if cfg.layout is None:
         return None
     return np.asarray(cfg.layout, dtype=np.float64)
 
 
-def _mean_episode_reward(td: TensorDictBase) -> float:
-    done = td["next", *_DONE_KEY]
-    episode_reward = td["next", *_EPISODE_REWARD_KEY]
-    if done.any():
-        return float(episode_reward[done].mean())
-    return float(td["next", *_REWARD_KEY].mean())
+def _rollout_metrics(data: TensorDictBase) -> dict[str, float]:
+    done = data["next", *_DONE_KEY]
+    ep_reward = data["next", *_EPISODE_REWARD_KEY]
+    env_done = done[..., 0].any(dim=-1)
+    farm_ep_reward = ep_reward[..., 0].mean(dim=-1)
+    completed = farm_ep_reward[env_done]
+    if completed.numel() == 0:
+        completed = data["next", *_REWARD_KEY].mean().reshape(1)
+
+    advantage = data["advantage"]
+    value_target = data["value_target"]
+    action = data[_ACTION_KEY]
+    return {
+        "train/episode_reward_mean": float(completed.mean()),
+        "train/episode_reward_min": float(completed.min()),
+        "train/episode_reward_max": float(completed.max()),
+        "train/episode_reward_std": float(completed.std(unbiased=False)),
+        "train/step_reward_mean": float(data["next", *_REWARD_KEY].mean()),
+        "train/episodes": float(int(env_done.sum())),
+        "train/advantage_mean": float(advantage.mean()),
+        "train/advantage_std": float(advantage.std(unbiased=False)),
+        "train/value_target_mean": float(value_target.mean()),
+        "train/value_target_std": float(value_target.std(unbiased=False)),
+        "train/explained_variance": explained_variance(
+            value_target, data[_STATE_VALUE_KEY]
+        ),
+        "train/action_yaw_mean": float(action.mean()),
+        "train/action_yaw_std": float(action.std(unbiased=False)),
+        "train/action_yaw_min": float(action.min()),
+        "train/action_yaw_max": float(action.max()),
+        "train/policy_entropy": float(
+            (_GAUSSIAN_ENTROPY_CONST + data[_SCALE_KEY].log()).mean()
+        ),
+    }
 
 
 class MappoTrainer:
@@ -114,17 +156,23 @@ class MappoTrainer:
             device=str(self.device),
         )
 
-    def _eval_reward(self, policy: torch.nn.Module) -> float:
+    def _eval(self, policy: torch.nn.Module) -> _EvalResult:
         env = self._make_env("eval")
         rewards = []
+        last_rollout: TensorDictBase | None = None
         with torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
             for _ in range(self.cfg.eval_episodes):
                 rollout = env.rollout(
                     self.cfg.scenario.max_steps, policy, break_when_any_done=True
                 )
                 rewards.append(float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean()))
+                last_rollout = rollout
         env.close()
-        return float(np.mean(rewards))
+        return _EvalResult(
+            float(np.mean(rewards)),
+            float(np.std(rewards)),
+            _render_eval(last_rollout, self.cfg.scenario),
+        )
 
     def _save_checkpoint(
         self, policy: torch.nn.Module, critic: torch.nn.Module, tag: str
@@ -168,10 +216,13 @@ class MappoTrainer:
             batch_size=minibatch_size,
         )
 
-        run = _wandb_run(cfg, self.settings)
+        logger = RunLogger(cfg, self.settings)
         history: list[dict[str, float]] = []
+        t_prev = time.perf_counter()
         try:
             for iteration, data in enumerate(collector):
+                collect_s = time.perf_counter() - t_prev
+                t0 = time.perf_counter()
                 with torch.no_grad():
                     loss_module.value_estimator(
                         data,
@@ -183,7 +234,8 @@ class MappoTrainer:
 
                 policy.train()
                 critic.train()
-                grad_norm = 0.0
+                grad_norms: list[float] = []
+                diagnostics: dict[str, list[float]] = {}
                 for _ in range(cfg.ppo.n_epochs):
                     for _ in range(cfg.ppo.num_minibatches):
                         minibatch = replay_buffer.sample()
@@ -194,58 +246,116 @@ class MappoTrainer:
                         if cfg.ppo.entropy_eps > 0:
                             loss_value = loss_value + loss_vals["loss_entropy"]
                         loss_value.backward()
-                        grad_norm = float(
-                            clip_grad_norm_(
-                                loss_module.parameters(), cfg.ppo.max_grad_norm
+                        grad_norms.append(
+                            float(
+                                clip_grad_norm_(
+                                    loss_module.parameters(), cfg.ppo.max_grad_norm
+                                )
                             )
                         )
                         optimiser.step()
                         optimiser.zero_grad()
+                        _accumulate_diagnostics(diagnostics, loss_vals, loss_value)
                 if scheduler is not None:
                     scheduler.step()
                 collector.update_policy_weights_()
 
                 policy.eval()
                 critic.eval()
+                update_s = time.perf_counter() - t0
 
                 metrics: dict[str, float] = {
                     "iteration": float(iteration),
-                    "train_episode_reward": _mean_episode_reward(data),
-                    "grad_norm": grad_norm,
-                    "lr": float(optimiser.param_groups[0]["lr"]),
+                    "train/total_frames": float((iteration + 1) * cfg.frames_per_batch),
+                    "optim/grad_norm": float(np.mean(grad_norms)),
+                    "optim/lr_actor": float(optimiser.param_groups[0]["lr"]),
+                    "optim/lr_critic": float(optimiser.param_groups[0]["lr"]),
                 }
+                metrics.update(_rollout_metrics(data))
+                metrics.update({k: float(np.mean(v)) for k, v in diagnostics.items()})
                 if self.designer is not None:
                     self.designer.update(data)
-                    metrics.update(self.designer.get_logs())
+                    metrics.update(
+                        {
+                            f"designer/{k}": v
+                            for k, v in self.designer.get_logs().items()
+                        }
+                    )
+
+                images: dict[str, NDArray[np.uint8]] = {}
+                eval_s = 0.0
                 if iteration % cfg.eval_interval == 0:
-                    metrics["eval_episode_reward"] = self._eval_reward(policy)
+                    t0 = time.perf_counter()
+                    result = self._eval(policy)
+                    eval_s = time.perf_counter() - t0
+                    metrics["eval/episode_reward_mean"] = result.reward_mean
+                    metrics["eval/episode_reward_std"] = result.reward_std
+                    if result.image is not None:
+                        images["eval/layout"] = result.image
 
                 is_final = iteration == cfg.n_iters - 1
+                checkpoint_path: Path | None = None
                 if iteration % cfg.checkpoint_interval == 0 or is_final:
-                    self._save_checkpoint(policy, critic, str(iteration))
+                    checkpoint_path = self._save_checkpoint(
+                        policy, critic, str(iteration)
+                    )
                 if is_final:
-                    self._save_checkpoint(policy, critic, "final")
+                    checkpoint_path = self._save_checkpoint(policy, critic, "final")
 
-                if run is not None:
-                    run.log(metrics)
+                metrics["time/collect_s"] = collect_s
+                metrics["time/update_s"] = update_s
+                metrics["time/eval_s"] = eval_s
+                metrics["time/iter_s"] = time.perf_counter() - t_prev
+
+                logger.log(metrics, images=images or None)
+                if is_final and checkpoint_path is not None:
+                    logger.log_artifact(
+                        checkpoint_path, name=f"{cfg.experiment_name}-checkpoint"
+                    )
                 history.append(metrics)
+                t_prev = time.perf_counter()
         finally:
             collector.shutdown()
             ref_env.close()
-            if run is not None:
-                run.finish()
+            logger.finish()
 
         return history
 
 
-def _wandb_run(cfg: TrainingConfig, settings: WindRlSettings) -> Run | None:
-    if not cfg.logging.use_wandb or settings.wandb_mode == "disabled":
-        return None
-    import wandb
+def _accumulate_diagnostics(
+    diagnostics: dict[str, list[float]],
+    loss_vals: TensorDictBase,
+    total: torch.Tensor,
+) -> None:
+    diagnostics.setdefault("loss/total", []).append(float(total.mean()))
+    keys = {
+        "loss/objective": "loss_objective",
+        "loss/critic": "loss_critic",
+        "loss/clip_fraction": "clip_fraction",
+        "loss/approx_kl": "kl_approx",
+        "loss/entropy": "loss_entropy",
+        "loss/explained_variance": "explained_variance",
+    }
+    for metric, key in keys.items():
+        if key in loss_vals.keys():  # noqa: SIM118 - TensorDict keys view
+            diagnostics.setdefault(metric, []).append(float(loss_vals[key].mean()))
 
-    return wandb.init(
-        project=cfg.logging.project,
-        name=cfg.experiment_name,
-        mode=settings.wandb_mode,
-        config=cfg.model_dump(),
-    )
+
+def _render_eval(
+    rollout: TensorDictBase | None, scenario: ScenarioConfig
+) -> NDArray[np.uint8] | None:
+    if rollout is None:
+        return None
+    try:
+        state = rollout["next", "state"]
+        return render_layout(
+            state["layout"][-1].numpy(force=True),
+            scenario,
+            state={
+                "wind_speed": state["wind_speed"][-1].numpy(force=True),
+                "wind_direction": state["wind_direction"][-1].numpy(force=True),
+                "yaw": state["yaw"][-1].numpy(force=True),
+            },
+        )
+    except Exception:  # pragma: no cover - render is best-effort telemetry
+        return None
