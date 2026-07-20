@@ -62,6 +62,10 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         self._layout_consumer = layout_consumer
         self._layout_override: torch.Tensor | None = None
         self._wind_override: tuple[float, float] | None = None
+        # Populated in ``_make_specs``; cached so the per-step state build (see
+        # ``_state_tensordict``) doesn't re-index the Composite state spec (which
+        # rebuilds a sub-spec per key) on every reset/step.
+        self._state_dtypes: dict[str, torch.dtype] = {}
         # ``return_state=False``: torchrl's base ``_reset``/``_step`` would call
         # ``torch.as_tensor(self.state())`` which fails on our dict-valued state.
         # We build the (Composite) state spec and inject the state ourselves.
@@ -118,6 +122,7 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
                 device=self.device,
             )
         self.observation_spec["state"] = state_spec
+        self._state_dtypes = {key: spec.dtype for key, spec in state_spec.items()}
         # Farm-level raw power (MW), injected each step so the unnormalised
         # episode power travels through rollouts as a plain observation.
         self.observation_spec["power"] = Unbounded(
@@ -144,11 +149,10 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
 
     def _state_tensordict(self) -> TensorDict:
         raw_state = self._env.state()
-        state_spec = self.observation_spec["state"]
         state = TensorDict({}, batch_size=[], device=self.device)
         for key, value in raw_state.items():
             tensor = torch.as_tensor(np.asarray(value), device=self.device)
-            state.set(key, tensor.to(dtype=state_spec[key].dtype))
+            state.set(key, tensor.to(dtype=self._state_dtypes[key]))
         return state
 
     def _reset(
