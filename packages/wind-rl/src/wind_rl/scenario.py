@@ -37,6 +37,14 @@ class ScenarioConfig(Config):
     fixed_wind_speed: float = Field(default=8.0, gt=0)
 
 
+class RealFarmConfig(Config):
+    """Selects a named wfcrl real farm; the map geometry is derived, not hardcoded."""
+
+    name: str
+    #: Metres of empty map padding added on every side of the layout bounding box.
+    margin: float = Field(default=500.0, gt=0)
+
+
 def _named_cases() -> dict[str, list[FastFarmCase | FlorisCase]]:
     # Imported lazily so importing wind_rl.scenario never requires wfcrl unless
     # the real-farm registry is actually used.
@@ -72,3 +80,30 @@ def real_farm_layout(name: str) -> NDArray[np.float64]:
     return np.column_stack(
         [np.asarray(xcoords, dtype=np.float64), np.asarray(ycoords, dtype=np.float64)]
     )
+
+
+def resolve_real_farm(
+    farm: RealFarmConfig, template: ScenarioConfig
+) -> tuple[ScenarioConfig, NDArray[np.float64]]:
+    """Resolve a named farm to an in-map ``(scenario, layout)`` pair.
+
+    Real farms carry their own metre-scale coordinate frames (HornsRev1's y runs
+    down to -1947 m). Wake physics depend only on RELATIVE turbine positions, so
+    the raw layout is translated so its bounding-box corner sits at
+    ``(margin, margin)`` and the map bounds are the bbox plus ``margin`` on every
+    side. Translation keeps every coordinate positive and in-map, which the mlp
+    position normalisation, the renderer axes, and the ``layout`` observation Box
+    (``low=0``) all assume. ``template`` supplies the non-geometry scenario fields
+    (max_steps, spacing, fixed wind); only name and geometry are derived here.
+    """
+    raw = real_farm_layout(farm.name)
+    layout = raw - raw.min(axis=0) + farm.margin
+    scenario = template.model_copy(
+        update={
+            "name": f"real_{farm.name}",
+            "n_turbines": len(layout),
+            "map_x_length": float(layout[:, 0].max() + farm.margin),
+            "map_y_length": float(layout[:, 1].max() + farm.margin),
+        }
+    )
+    return scenario, layout

@@ -1,0 +1,98 @@
+"""Unit tests for the sweep's pure reductions: windowed delta, gates, aggregation.
+
+These are the parts a run.py trusts without re-running training, so they are
+tested on hand-built results (no MappoTrainer). The end-to-end plumbing is covered
+by a manual smoke run, not here.
+"""
+
+from __future__ import annotations
+
+import math
+
+from wind_rl.experiment.sweep import RunResult, SweepResult
+from wind_rl.experiment.table import format_table, summarize
+from wind_rl.experiment.verdict import improves, is_finite, windowed_delta
+
+
+def _run(variant: str, seed: int, delta: float, finite: bool = True) -> RunResult:
+    # first/last chosen so last - first == delta; auc/seconds are aggregation fodder.
+    return RunResult(
+        variant=variant,
+        seed=seed,
+        first=1.0,
+        last=1.0 + delta,
+        delta=delta,
+        auc=2.0 + seed,
+        seconds=10.0 + seed,
+        finite=finite,
+    )
+
+
+def test_windowed_delta_first_and_last_third() -> None:
+    # len 6 -> window 2: first mean([1,2])=1.5, last mean([5,6])=5.5.
+    win = windowed_delta([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    assert win.first == 1.5
+    assert win.last == 5.5
+    assert win.delta == 4.0
+
+
+def test_windowed_delta_single_value_has_zero_delta() -> None:
+    win = windowed_delta([7.0])
+    assert (win.first, win.last, win.delta) == (7.0, 7.0, 0.0)
+
+
+def test_windowed_delta_empty_is_nan() -> None:
+    win = windowed_delta([])
+    assert math.isnan(win.first) and math.isnan(win.last) and math.isnan(win.delta)
+
+
+def test_improves_gate_uses_margin() -> None:
+    gate = improves(margin=0.5)
+    assert gate(_run("a", 0, delta=0.6))
+    assert not gate(_run("a", 0, delta=0.5))  # strictly greater
+    assert not gate(_run("a", 0, delta=-1.0))
+
+
+def test_is_finite_gate() -> None:
+    gate = is_finite()
+    assert gate(_run("a", 0, delta=1.0, finite=True))
+    assert not gate(_run("a", 0, delta=1.0, finite=False))
+
+
+def test_summarize_aggregates_across_seeds_in_order() -> None:
+    result = SweepResult(
+        runs=[
+            _run("mlp", 0, delta=1.0),
+            _run("mlp", 1, delta=3.0),
+            _run("gcn", 0, delta=-1.0),
+            _run("gcn", 1, delta=0.5, finite=False),
+        ]
+    )
+    summaries = summarize(result, improves())
+
+    assert [s.name for s in summaries] == ["mlp", "gcn"]  # first-seen order
+
+    mlp = summaries[0]
+    assert mlp.n_seeds == 2
+    assert mlp.delta_mean == 2.0
+    assert mlp.delta_std == 1.0  # population std of [1, 3]
+    assert mlp.auc == 2.5  # mean([2, 3])
+    assert mlp.finite
+    assert mlp.passed  # both seeds improve
+
+    gcn = summaries[1]
+    assert not gcn.finite  # one seed non-finite
+    assert not gcn.passed  # seed 0 delta -1 does not beat baseline
+
+
+def test_summarize_finite_gate_independent_of_learning() -> None:
+    result = SweepResult(runs=[_run("flat", 0, delta=-2.0, finite=True)])
+    (summary,) = summarize(result, is_finite())
+    assert summary.passed  # non-finite gate: flat/regressing but finite still PASSes
+
+
+def test_format_table_lists_every_variant_and_verdict() -> None:
+    result = SweepResult(runs=[_run("mlp", 0, delta=1.0), _run("gcn", 0, delta=-1.0)])
+    table = format_table(summarize(result, improves()))
+    assert "mlp" in table and "gcn" in table
+    assert "PASS" in table and "FAIL" in table
