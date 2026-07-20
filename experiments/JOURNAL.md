@@ -20,3 +20,10 @@ to the run/report. See `experiments/README.md` for the contract.
   healthy (clip <2%, KL <0.005) with two honest flags (grad norm ~8x the clip
   budget; critic explained-variance ~0 under fixed wind). 6-turbine `mlp` scale
   probe also learns (28.82 -> 32.02 +3.20). See `0001_fixed_layout_marl/report.md`.
+- `0003_arch_bench` — PASS — architecture-benchmark suite ranks `mlp`/`gcn`/
+  `set_transformer` on a fixed 8-turbine layout via two fast proxies under
+  identical budgets: critic value-regression EV (set_transformer 0.685 > mlp
+  0.592 > gcn 0.185) and 8-iter/3-seed MAPPO delta (only set_transformer mean
+  +0.158). All three FUNCTIONAL (EV>0, no NaN); no winner crowned — deltas are
+  within seed noise and fixed wind under-exercises geometric bias (~12 min). See
+  `0003_arch_bench/report.md`.
