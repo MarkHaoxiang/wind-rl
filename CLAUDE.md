@@ -84,7 +84,8 @@ insufficient.
 
 ML experiments live in `experiments/` (contract: `experiments/README.md`).
 Numbered `NNNN_slug/` directories are frameworks, not single runs; verdicts
-are asserted in code and journalled to `experiments/JOURNAL.md`.
+are asserted in code. `experiments/JOURNAL.md` is **owner-managed**: the owner
+writes entries or dictates them verbatim — never append to it unprompted.
 
 ## docs/plans and docs/research are owner-reviewed
 

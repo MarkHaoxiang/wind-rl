@@ -5,24 +5,17 @@ of related runs sharing machinery, not a single run. Prefer adding a variant
 to an existing framework over scaffolding a new number.
 
 **A new study is a new `conf/` variant set in an existing framework, not a new
-directory — unless the experiment SHAPE is genuinely new.** Surviving frameworks:
-
-- **`0001_fixed_layout_marl`** — the unified fixed-layout MARL benchmark: run
-  `MappoTrainer` over a list of config variants on a fixed layout, tabulate, and
-  gate each variant. Three config entry points (`config` arch benchmark,
-  `config=ppo_sweep` PPO levers, `config=real_farms` named wfcrl farms) share one
-  library loop (`wind_rl.experiment.sweep`/`table`/`verdict`). PPO tuning (was
-  0004) and real-farm training (was 0005) are variant sets here, not their own dirs.
-- **`0002_flowmap_prior`** — flow-map prior (mfm consistency loss); parked.
-- **`0003_arch_bench`** — architecture proxy suite (fast critic/policy proxies that
-  rank architectures without full training).
+directory — unless the experiment SHAPE is genuinely new.** All shared
+machinery (variant sweeps, comparison tables, verdict gates, wandb handling,
+architecture-benchmark proxies) lives in `wind_rl.experiment`; a framework is
+only a `conf/`, a thin `run.py` of glue, and a `report.md`.
 
 ## Layout
 
 ```
 experiments/
 ├── README.md              # this contract
-├── JOURNAL.md              # one verdict line per concluded finding, append-only
+├── JOURNAL.md              # owner-managed verdict log (see below)
 └── NNNN_slug/
     ├── run.py               # entry point
     ├── conf/                # config groups (variants)
@@ -56,19 +49,22 @@ layouts, rendered videos, config snapshots) go under `WIND_RL_WDIR`
 var) — set it per-machine, not hardcoded in a script.
 
 Tracking (config, metrics, media, verdict) goes to **Weights & Biases**,
-controlled by `WIND_RL_WANDB_MODE` / `WANDB_MODE`:
+controlled by `WIND_RL_WANDB_MODE` (plain `WANDB_MODE` is not honoured —
+`WindRlSettings` reads only `WIND_RL_*` variables):
 
 ```bash
-WANDB_MODE=disabled uv run python experiments/NNNN_slug/run.py   # fast plumbing check, no tracking
-WANDB_MODE=offline  uv run python experiments/NNNN_slug/run.py   # record locally, `wandb sync` later
-WANDB_MODE=online   uv run python experiments/NNNN_slug/run.py   # requires `wandb login`
+WIND_RL_WANDB_MODE=disabled uv run python experiments/NNNN_slug/run.py   # fast plumbing check, no tracking
+WIND_RL_WANDB_MODE=offline  uv run python experiments/NNNN_slug/run.py   # record locally, `wandb sync` later
+WIND_RL_WANDB_MODE=online   uv run python experiments/NNNN_slug/run.py   # requires `wandb login`
 ```
 
 ## JOURNAL.md
 
-Append-only. One line per concluded finding: framework, one-line verdict,
-pointer to the run/report. Don't journal in package docs (`CLAUDE.md` cites
-experiment numbers instead) and don't rewrite past entries.
+**Owner-managed.** The owner writes journal entries, or dictates them
+verbatim; agents never append on their own initiative. One line per concluded
+finding: framework, one-line verdict, pointer to the run/report. Don't journal
+in package docs (`CLAUDE.md` cites experiment numbers instead) and don't
+rewrite past entries.
 
 ## Planned frameworks
 
