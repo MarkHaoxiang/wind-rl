@@ -1,0 +1,90 @@
+# 0001_fixed_layout_marl / hornsrev_full -- full-budget HornsRev1 (80t) under VARIED wind.
+#
+# The real run the 0005->0001 real-farm probe called for: HornsRev1 (80 turbines,
+# the densest-wake real farm, strongest learning signal in the smoke probe) trained
+# to convergence under VARIED wind rather than the probe's fixed 270 deg. Varied
+# wind is the same convention 0003's decisive profile uses -- `fixed_wind_direction:
+# null`, so wfcrl samples a random inflow direction every episode; a wind-conditioned,
+# rotation-aware policy must generalise, and eval averages over several random-wind
+# episodes (eval_episodes>1) so the windowed delta tracks learning, not the draw.
+#
+# Two arms -- `mlp` (the probe's known-good baseline) and `gcn` (the 0003 promotion
+# candidate) -- over 2 seeds each, IDENTICAL PPO budget. gate=improves: the question
+# is whether wake steering shows real headroom at 80t under varied wind (each arm
+# must beat its own first-window eval baseline), and whether gcn holds up at scale.
+#
+# Compute is shared (32 cores / 1 GPU with a second training agent): device=cpu
+# (FLORIS is CPU-bound; the models are tiny), n_envs=10 caps parallel collection
+# (largest divisor of frames_per_batch=1000 that is <=12), arms run sequentially by
+# the sweep loop. FLORIS ~0.9 ms/turbine/step => 80t is heavy, so eval_interval=5
+# reduces the frequency of the expensive 80-turbine flow-field render/replay without
+# dropping it (renders/replays land on every 5th iter; learning is still tracked by
+# the per-eval reward on those iters). Run:
+#   WIND_RL_WANDB_MODE=online uv run python experiments/0001_fixed_layout_marl/run.py \
+#     config=hornsrev_full
+
+gate: improves
+seeds: [0, 1]
+
+farm:
+  name: HornsRev1
+  margin: 500.0
+
+base:
+  experiment_name: 0001_hornsrev_full
+  seed: 0
+  device: cpu
+  n_iters: 60
+  frames_per_batch: 1000
+  # 10 = largest divisor of frames_per_batch <= 12 (shared-machine collection cap).
+  n_envs: 10
+  # 80-turbine renders/replays are expensive; eval (and its render) every 5th iter.
+  eval_interval: 5
+  # Varied wind => average eval over several random-wind episodes so the windowed
+  # delta tracks learning, not the sampled direction.
+  eval_episodes: 5
+  checkpoint_interval: 20
+
+  scenario:
+    # name / n_turbines / map_*_length are overwritten by resolve_real_farm from
+    # HornsRev1's geometry; the fields below are the template it keeps.
+    name: real_placeholder
+    n_turbines: 1
+    max_steps: 20
+    map_x_length: 1.0
+    map_y_length: 1.0
+    min_distance_between_turbines: 300.0
+    # null => wfcrl samples a random inflow direction every episode (varied wind).
+    fixed_wind_direction: null
+    fixed_wind_speed: 8.0
+
+  ppo:
+    clip_epsilon: 0.2
+    gamma: 0.99
+    lmbda: 0.95
+    entropy_eps: 0.0
+    normalize_advantage: true
+    lr: 3.0e-4
+    max_grad_norm: 1.0
+    n_epochs: 8
+    num_minibatches: 4
+    lr_scheduler: true
+    min_lr: 1.0e-4
+
+  logging:
+    project: wind-rl
+    use_wandb: true
+
+variants:
+  - name: mlp
+    model:
+      kind: mlp
+      num_cells: 64
+      depth: 2
+      initial_std: 0.3
+  - name: gcn
+    model:
+      kind: gcn
+      hidden_dim: 64
+      num_layers: 2
+      initial_std: 0.3
