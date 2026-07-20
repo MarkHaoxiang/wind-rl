@@ -35,6 +35,10 @@ class ScenarioConfig(Config):
     # effect once fixed_wind_direction is set -- speed alone cannot be fixed.
     fixed_wind_direction: float | None = None
     fixed_wind_speed: float = Field(default=8.0, gt=0)
+    # Weight on the wfcrl fatigue-load penalty in the per-step reward
+    # (power/u_inf^3 - load_coef * mean|load|). The wfcrl default is 0.1; the
+    # NeurIPS-2024 MAPPO benchmark trains with 1.0.
+    load_coef: float = Field(default=0.1, ge=0)
 
 
 class RealFarmConfig(Config):

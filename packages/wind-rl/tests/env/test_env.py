@@ -100,6 +100,31 @@ def test_random_rollout_accumulates_reward(scenario: ScenarioConfig) -> None:
     torch.testing.assert_close(episode_reward, running_sum)
 
 
+def test_farm_power_injected_and_positive(scenario: ScenarioConfig) -> None:
+    """The injected raw farm power is zero on reset, positive once turbines spin."""
+    env = make_env("train", scenario)
+    env.set_seed(0)
+
+    reset = env.reset()
+    assert float(reset["power"]) == 0.0
+
+    rollout = env.rollout(5)
+    powers = rollout["next", "power"]
+    assert powers.shape == torch.Size([5, 1])
+    assert torch.all(powers > 0.0)
+    # The last injected step power equals the wrapper's live farm-power reading.
+    torch.testing.assert_close(
+        float(powers[-1]), env.base_env.farm_power(), atol=1e-4, rtol=1e-4
+    )
+
+
+def test_load_coef_flows_into_env(scenario: ScenarioConfig) -> None:
+    """scenario.load_coef reaches the wfcrl env's reward weighting."""
+    heavy = scenario.model_copy(update={"load_coef": 1.0})
+    env = make_env("train", heavy)
+    assert env.base_env.designable_env.load_coef == 1.0
+
+
 def test_reward_normalisation_transforms() -> None:
     """RewardNormalisation applies (reward - mean) / std; identity when unset."""
     norm = RewardNormalisation(mean=2.0, std=4.0)

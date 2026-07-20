@@ -32,6 +32,7 @@ import torch
 from numpy.typing import NDArray
 from tensordict import TensorDict, TensorDictBase
 from tensordict.nn import TensorDictModule
+from torchrl.data import Unbounded
 from torchrl.envs import PettingZooWrapper
 from torchrl.envs.libs.gym import _gym_to_torchrl_spec_transform, set_gym_backend
 
@@ -95,6 +96,17 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         """Fix (or clear, with ``None``) the reset wind as ``(direction_deg, speed_ms)``."""
         self._wind_override = wind
 
+    def farm_power(self) -> float:
+        """Total farm power (MW) from the last step's per-turbine infos; 0 pre-step.
+
+        wfcrl stores per-turbine power (already divided to MW) in each agent's
+        ``info["power"]`` after every joint step; the farm total is their sum.
+        Read raw so the unnormalised episode power is observable alongside the
+        ``power/u_inf^3 - load`` reward the policy optimises.
+        """
+        infos = getattr(self.designable_env, "infos", {})
+        return float(sum(float(info.get("power", 0.0)) for info in infos.values()))
+
     def _make_specs(self, env: object) -> None:
         super()._make_specs(env)
         # Build a proper Composite spec for the (dict-valued) global state.
@@ -106,6 +118,11 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
                 device=self.device,
             )
         self.observation_spec["state"] = state_spec
+        # Farm-level raw power (MW), injected each step so the unnormalised
+        # episode power travels through rollouts as a plain observation.
+        self.observation_spec["power"] = Unbounded(
+            shape=torch.Size([1]), device=self.device
+        )
 
     def _resolve_layout(
         self, tensordict: TensorDictBase | None
@@ -146,9 +163,11 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
             options["wind_direction"], options["wind_speed"] = self._wind_override
         out = super()._reset(tensordict, options=options or None, **kwargs)
         out.set("state", self._state_tensordict())
+        out.set("power", torch.zeros(1, device=self.device))
         return out
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         out = super()._step(tensordict)
         out.set("state", self._state_tensordict())
+        out.set("power", torch.tensor([self.farm_power()], device=self.device))
         return out

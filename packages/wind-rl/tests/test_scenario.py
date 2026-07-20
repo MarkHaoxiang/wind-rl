@@ -4,7 +4,26 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from wind_rl.scenario import ScenarioConfig, list_real_farms, real_farm_layout
+from wind_rl.scenario import (
+    RealFarmConfig,
+    ScenarioConfig,
+    list_real_farms,
+    real_farm_layout,
+    resolve_real_farm,
+)
+
+
+def _template() -> ScenarioConfig:
+    return ScenarioConfig(
+        name="template",
+        n_turbines=1,
+        max_steps=150,
+        map_x_length=1.0,
+        map_y_length=1.0,
+        min_distance_between_turbines=150.0,
+        fixed_wind_direction=270.0,
+        load_coef=1.0,
+    )
 
 
 # dict[str, Any]: values span str/int/float for **-unpacking into ScenarioConfig
@@ -77,3 +96,31 @@ def test_real_farm_layout_accepts_trailing_underscore() -> None:
 def test_real_farm_layout_unknown_raises() -> None:
     with pytest.raises(KeyError):
         real_farm_layout("NotARealFarm")
+
+
+@pytest.mark.sim
+def test_resolve_turb3_row1_is_a_4d_aligned_row() -> None:
+    scenario, layout = resolve_real_farm(RealFarmConfig(name="Turb3_Row1"), _template())
+    assert scenario.n_turbines == 3
+    assert layout.shape == (3, 2)
+    # Template (non-geometry) fields are preserved through the resolve.
+    assert scenario.max_steps == 150
+    assert scenario.load_coef == 1.0
+    assert scenario.fixed_wind_direction == 270.0
+    # Aligned row (constant y) at 4D = 504 m spacing (D = 126 m).
+    assert np.allclose(layout[:, 1], layout[0, 1])
+    spacings = np.diff(layout[:, 0])
+    assert np.allclose(spacings, 504.0)
+
+
+@pytest.mark.sim
+def test_resolve_ablaincourt_shape_and_in_bounds() -> None:
+    scenario, layout = resolve_real_farm(
+        RealFarmConfig(name="Ablaincourt"), _template()
+    )
+    assert scenario.n_turbines == 7
+    assert layout.shape == (7, 2)
+    # Translated fully in-map (every coordinate positive and within map bounds).
+    assert np.all(layout > 0.0)
+    assert np.all(layout[:, 0] <= scenario.map_x_length)
+    assert np.all(layout[:, 1] <= scenario.map_y_length)

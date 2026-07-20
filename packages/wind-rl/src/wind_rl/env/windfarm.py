@@ -225,6 +225,7 @@ def build_designable_windfarm(
         controls=get_default_control(["yaw"]),
         start_iter=math.ceil(case.t_init / case.dt),
         max_num_steps=scenario.max_steps,
+        load_coef=scenario.load_coef,
         scenario=scenario,
         render_mode="rgb_array" if render else None,
     )
