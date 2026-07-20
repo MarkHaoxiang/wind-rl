@@ -6,35 +6,32 @@ wind-rl is the applications-paper successor to the WFCRL section of **DiCoDe**
 (Li, Amir, Prorok, "Scaling Multi-Agent Environment Co-Design with Diffusion
 Models", arXiv:2511.03100, ICML 2026). DiCoDe validated diffusion-guided
 wind-farm layout co-design only to 16 turbines on FLORIS with yaw-only control.
-wind-rl scales this substantially using **flow-map layout generators** (few-step
-sampling), **permutation/E(n)-equivariant architectures**, and
-**domain-specific fine-tuning**, and pushes to real 32/64/92-turbine farms.
+wind-rl scales this substantially using **permutation/E(n)-equivariant
+architectures** and **domain-specific fine-tuning**, and pushes to real
+32/64/92-turbine farms.
 
 ---
 
 ## 1. Research framing
 
 ### Thesis
-Diffusion-guided environment co-design does not scale (sampling cost, fragile
-guidance annealing, MLP-on-flattened-coords generator with no geometric
-structure, REINFORCE baseline collapses past 4 turbines). wind-rl shows that a
-**flow-map generator + equivariant layout prior + equivariant MAPPO policy**
-co-designed jointly scales to full real-world wind farms with order-of-magnitude
-cheaper designer iterations, and that fine-tuning a generic pretrained layout
-prior to a specific site's boundary + wind rose yields site-optimised layouts.
+Diffusion-guided environment co-design does not scale (fragile guidance
+annealing, MLP-on-flattened-coords generator with no geometric structure,
+REINFORCE baseline collapses past 4 turbines). wind-rl shows that an
+**equivariant layout prior + equivariant MAPPO policy** co-designed jointly
+scales to full real-world wind farms, and that fine-tuning a generic pretrained
+layout prior to a specific site's boundary + wind rose yields site-optimised
+layouts.
 
 ### Claims the paper would make
-- **C1 (efficiency).** A flow-map designer matches DiCoDe's DDIM designer
-  power-capture quality at 1–4 sampling steps vs 50 DDIM steps + recurrences
-  (>=10x fewer generator NFEs per designer iteration; report wall-clock).
-- **C2 (scale).** Co-design remains stable and beats all non-generative
+- **C1 (scale).** Co-design remains stable and beats all non-generative
   baselines at 32/64/92 turbines, where DiCoDe was never evaluated and the
   REINFORCE RL baseline collapses.
-- **C3 (architecture).** Permutation-invariant / E(n)-equivariant layout
+- **C2 (architecture).** Permutation-invariant / E(n)-equivariant layout
   generator and policy improve sample efficiency and final power vs the
   MLP/hand-engineered-wind-GNN of DiCoDe at matched compute; equivariance
   removes the need for the fragile guidance-weight annealing schedule.
-- **C4 (fine-tuning).** A layout prior pretrained on generic procedural layouts,
+- **C3 (fine-tuning).** A layout prior pretrained on generic procedural layouts,
   then fine-tuned per site (boundary polygon + measured wind rose), produces
   higher-power constraint-satisfying layouts than a from-scratch or generic
   prior. (Secondary: FLORIS-pretrained policy transfers to FastFarm with
@@ -46,10 +43,11 @@ Random, Fixed, ManualCases (real published layouts), SamplingDesigner
 ReinforceDesigner (per-turbine Gaussian REINFORCE — the "RL" baseline),
 ReplayDesigner (prioritised population + mutation), and **DicodeDesigner**
 (guided DDIM, PUG) as the headline prior-art competitor. wind-rl's contribution
-is the **FlowMapDesigner** measured against these.
+— equivariant architectures, real-farm scale, and per-site fine-tuning — is
+measured against these.
 
 ### "Domain-specific fine-tuned training" — chosen interpretation (DECISION, confirm)
-Primary: **layout-prior fine-tuning.** Pretrain an unconditional flow-map layout
+Primary: **layout-prior fine-tuning.** Pretrain an unconditional layout
 generator on procedurally generated feasible layouts (rejection / projected-
 gradient sampling, as in DiCoDe `setup_scenario.py`), then fine-tune per real
 site on that site's *boundary polygon constraints and measured wind-rose
@@ -58,22 +56,19 @@ that farm. Secondary track: **policy fidelity transfer** — MAPPO policy
 pretrained on cheap FLORIS, fine-tuned on high-fidelity FastFarm. We propose to
 pursue the layout-prior interpretation as the headline (it is what "fine-tuned"
 most naturally means for a generative prior) and treat FastFarm transfer as a
-stretch experiment. **Owner: confirm which is the paper's C4.**
+stretch experiment. **Owner: confirm which is the paper's C3.**
 
 ### Milestone roadmap
 - **M1 — Reproduce baseline.** MAPPO-on-WFCRL at small scale (2–3 then 8–16
   turbines, FLORIS, yaw). Match DiCoDe's power-capture numbers. Walking
   skeleton + infra (CI, tests, config, logging).
-- **M2 — Flow-map designer.** Replace guided DDIM with a flow-map generator
-  behind the same `Designer` interface; few-step guided sampling. Demonstrate C1
-  at <=16 turbines.
-- **M3 — Architecture upgrades.** Permutation-invariant / E(n)-equivariant
+- **M2 — Architecture upgrades.** Permutation-invariant / E(n)-equivariant
   layout generator (real E-GNN, not DiCoDe's MLP stub) and equivariant MAPPO
-  policy/critic. Demonstrate C3; drop guidance annealing.
-- **M4 — Scale + fine-tune.** 32/64/92 turbines and real farm layouts
+  policy/critic. Demonstrate C2; drop guidance annealing.
+- **M3 — Scale + fine-tune.** 32/64/92 turbines and real farm layouts
   (HornsRev1/2, Ormonde, WMR from `wfcrl.environments.data_cases`); per-site
-  fine-tuning (C4); optional FastFarm transfer.
-- **M5 — Paper experiments.** Full sweep across designers x scenarios x seeds,
+  fine-tuning (C3); optional FastFarm transfer.
+- **M4 — Paper experiments.** Full sweep across designers x scenarios x seeds,
   wall-clock/NFE benchmarks, ablations, figures. Evidence-gated (asserted
   thresholds, never eyeballed).
 
@@ -116,9 +111,7 @@ packages/wind-rl/src/wind_rl/
     heads.py         # MultiAgentMLP + NormalParamExtractor -> TanhNormal actor;
                      #   mean-pooled centralized critic head.
   generative/
-    flowmap.py       # Flow-map layout model conforming to a .v(s,u,x,cond)-style
-                     #   BaseModel interface (mfm convention); few-step sampler.
-    diffusion.py     # DDIM reference generator (repro of DiCoDe, C1 baseline).
+    diffusion.py     # DDIM layout generator (repro of DiCoDe designer).
     guidance.py      # Guided sampling: PUG-style projected guidance + constraint
                      #   projection (min-distance, boundary polygon).
     constraints.py   # Feasibility: min-distance + site boundary; soft penalty and
@@ -129,7 +122,7 @@ packages/wind-rl/src/wind_rl/
     buffer.py        # File-backed lock-protected layout buffer (pop at env reset).
     value_learner.py # ValueLearner: critic distillation for env-critic training.
     designers.py     # Random/Fixed/Manual/Sampling/Descent/Reinforce/Replay +
-                     #   FlowMapDesigner + DicodeDesigner; create_designer() factory
+                     #   DicodeDesigner; create_designer() factory
                      #   over discriminated-union DesignerConfig.
   rl/
     mappo.py         # MAPPO trainer (TorchRL ClipPPOLoss/GAE/SyncDataCollector).
@@ -278,91 +271,79 @@ Accept: permutation-equivariance unit test (permuting turbines permutes actions
 identically); MAPPO run on 8-turbine FLORIS beats MLP at matched frames
 (thresholded); no compiled geometric extension imported.
 
-**T6 — Diffusion reference designer (C1 baseline) + env critic + distillation.**
-Goal: reproduce DiCoDe's guided-DDIM `DicodeDesigner` for head-to-head compares.
+**T6 — Diffusion reference designer + env critic + distillation.**
+Goal: reproduce DiCoDe's guided-DDIM `DicodeDesigner` for comparison under our infra.
 Files: `generative/{diffusion.py,guidance.py,constraints.py}`,
 `design/value_learner.py`.
 Interfaces: guided sampling with PUG projected guidance; `ValueLearner.update`.
 Accept: on 8-turbine FLORIS, DicodeDesigner co-design matches published DiCoDe
 power within tolerance; feasibility maintained; NFE/iteration logged.
 
-**T7 — Flow-map layout generator + FlowMapDesigner (C1).**
-Goal: few-step flow-map generator behind the `Designer` interface.
-Files: `generative/flowmap.py`, `design/designers.py::FlowMapDesigner`.
-Interfaces: `.v(s,u,x,cond)`-style `BaseModel` (mfm convention); few-step guided
-sampler reusing `guidance.py`.
-Accept: FlowMapDesigner reaches DicodeDesigner power at <=16 turbines with
->=10x fewer generator NFEs/iteration (asserted); pretraining script produces a
-prior whose unconditional samples are feasible.
-
-**T8 — E(n)-equivariant generator + policy (C3).**
+**T7 — E(n)-equivariant generator + policy (C2).**
 Goal: real EGNN replacing the DiCoDe stub; equivariant layout prior + policy.
 Files: `models/equivariant.py`.
 Interfaces: E(n)-equivariant layers (torch-native scatter).
-Accept: rotation/translation-equivariance unit tests pass; equivariant flow-map
-prior + equivariant policy meets/beats T5/T7 at matched compute; run is stable
+Accept: rotation/translation-equivariance unit tests pass; equivariant layout
+prior + equivariant policy meets/beats T5 at matched compute; run is stable
 **without guidance-weight annealing** (ablate annealing on/off).
 
-**T9 — Scale to 32/64/92 + real farms (C2).**
+**T8 — Scale to 32/64/92 + real farms (C1).**
 Goal: co-design on large real layouts; wall-clock/NFE benchmarks.
 Files: `experiments/0002_scale/{run.py,conf/}`, report + journal.
 Interfaces: scenarios `wfcrl_{32,64,92}` + HornsRev1/2/Ormonde/WMR.
-Accept: FlowMapDesigner (+equivariant) trains stably at 64 and 92 turbines where
+Accept: the equivariant co-designer trains stably at 64 and 92 turbines where
 REINFORCE collapses; power > all non-generative baselines (thresholded); FLORIS
 case-file housekeeping bounded (no unbounded `__simul__` accumulation).
 
-**T10 — Domain-specific fine-tuning (C4).**
+**T9 — Domain-specific fine-tuning (C3).**
 Goal: fine-tune pretrained layout prior per site (boundary + wind rose).
-Files: `experiments/0003_finetune/{run.py,conf/}`; `generative/flowmap.py` hooks.
+Files: `experiments/0003_finetune/{run.py,conf/}`; `generative/diffusion.py` hooks.
 Interfaces: fine-tune API on a pretrained prior with site constraint/wind-rose
 conditioning; optional FastFarm policy-transfer path in `make_env(simulator=...)`.
 Accept: fine-tuned prior yields higher-power feasible layouts than generic prior
 on >=2 real sites (thresholded); (stretch) FLORIS->FastFarm policy fine-tune
 beats from-scratch FastFarm at matched wall-clock.
 
-**T11 — Paper experiment sweep + figures (M5).**
+**T10 — Paper experiment sweep + figures (M4).**
 Goal: designers x scenarios x seeds sweep, ablations, evidence-gated reports.
 Files: `experiments/0004_paper/{run.py,conf/}`, `report.md`.
-Accept: all headline claims C1–C4 backed by asserted thresholds in code; figures
+Accept: all headline claims C1–C3 backed by asserted thresholds in code; figures
 regenerate from logged runs; `report.md` states hypothesis->setup->results->
 decision per the experiments contract.
 
-**T12 (optional) — FastFarm high-fidelity integration hardening.**
-Goal: robust MPI/FastFarm path if C4's transfer track is adopted.
+**T11 (optional) — FastFarm high-fidelity integration hardening.**
+Goal: robust MPI/FastFarm path if C3's transfer track is adopted.
 Accept: FastFarm 3-turbine env runs a short rollout in CI-skippable slow test.
 
 ---
 
 ## 5. Owner decisions (2026-07-19)
 
-1. **C4 scope: layout-prior per-site fine-tuning is the headline.**
+1. **C3 scope: layout-prior per-site fine-tuning is the headline.**
    FLORIS->FastFarm policy transfer is a stretch experiment only; FastFarm/MPI is
-   NOT on the critical path (T12 stays optional).
-2. **Flow-map source: vendor the `mfm` (Meta Flow Maps) package** as a workspace
-   member (as in physics-informed-flow-map). T7 builds on mfm's consistency
-   loss/sampler interfaces rather than reimplementing them.
-3. **Architectures: research first, simple first.** A dedicated research pass on
+   NOT on the critical path (T11 stays optional).
+2. **Architectures: research first, simple first.** A dedicated research pass on
    geometric/equivariant architectures is commissioned separately. The FIRST
    implemented version uses something simple (e.g. a plain GCN). There must be an
    **independent experiment suite just for quickly benchmarking architectures**
    (its own numbered experiments framework, cheap proxy tasks, fast turnaround)
    before any architecture is promoted into the main training pipeline. The
    long-term target is the leading spherical-harmonics-with-attention family,
-   specialised to 2D (circular harmonics, cheap via FFT) — T5/T8 are subordinate
+   specialised to 2D (circular harmonics, cheap via FFT) — T5/T7 are subordinate
    to what the research pass + benchmark suite conclude.
-4. **Baselines: deprioritised for now.** T6 (DiCoDe DDIM reference designer)
+3. **Baselines: deprioritised for now.** T6 (DiCoDe DDIM reference designer)
    drops out of the critical path; comparisons under our own infra can come later.
    Build the method first.
 
-5. **Monorepo layout.** The main package lives at `packages/wind-rl/src/wind_rl/`
+4. **Monorepo layout.** The main package lives at `packages/wind-rl/src/wind_rl/`
    (catan-engine layout): the root pyproject is a virtual workspace coordinator
    (tooling + dependency groups only); each package under `packages/` owns its
    dependencies and tests.
-6. **Experiment 0001 is the fixed-layout MARL benchmark**: training various MARL
+5. **Experiment 0001 is the fixed-layout MARL benchmark**: training various MARL
    agents (architectures/algorithm variants) on fixed wind-farm layouts.
    Co-design experiments start at 0002+.
-7. **mypy at maximum feasible strictness** (disallow_any_generics on; extra
+6. **mypy at maximum feasible strictness** (disallow_any_generics on; extra
    error codes; explicit-Any minimized at third-party boundaries).
 
-Remaining open (non-blocking, revisit at M4/M5): compute/fidelity budget for the
+Remaining open (non-blocking, revisit at M3/M4): compute/fidelity budget for the
 92-turbine sweep (FLORIS-only assumed sufficient until shown otherwise).

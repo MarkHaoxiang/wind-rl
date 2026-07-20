@@ -5,9 +5,8 @@ code in this repository.
 
 ## What this is
 
-wind-rl scales wind-farm layout co-design (flow-map generators, equivariant
-architectures, per-site fine-tuning) past DiCoDe (arXiv:2511.03100) to real
-32/64/92-turbine farms. Read `docs/plans/2026-07-19-wind-rl-architecture.md`
+wind-rl scales wind-farm layout co-design (equivariant architectures, per-site
+fine-tuning) past DiCoDe (arXiv:2511.03100) to real 32/64/92-turbine farms. Read `docs/plans/2026-07-19-wind-rl-architecture.md`
 before working on architecture, milestones, or scope — it is the source of
 truth for the code layout, interfaces, and the owner decisions in its §5.
 
