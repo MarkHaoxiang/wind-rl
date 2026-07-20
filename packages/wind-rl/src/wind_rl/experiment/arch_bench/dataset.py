@@ -7,9 +7,6 @@ are held constant across the whole dataset, so the only variation the critic mus
 explain is the yaw trajectory -- exactly the geometric-value signal the proxy is
 meant to isolate. The dataset is generated once and cached under
 ``WIND_RL_WDIR`` keyed on its generating parameters.
-
-Kept in the experiment dir (not the library) deliberately: promotion of shared
-helpers happens later.
 """
 
 from __future__ import annotations

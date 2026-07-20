@@ -13,12 +13,16 @@ from typing import NamedTuple
 
 import numpy as np
 import torch
-from dataset import TARGET_KEY, generate_or_load, split_standardized
 from numpy.typing import NDArray
 from tensordict import TensorDict
 from torch.nn.functional import mse_loss
 
 from wind_rl.env.factory import make_env
+from wind_rl.experiment.arch_bench.dataset import (
+    TARGET_KEY,
+    generate_or_load,
+    split_standardized,
+)
 from wind_rl.models import ModelConfig, build_actor_critic
 from wind_rl.rl.logging import explained_variance
 from wind_rl.scenario import ScenarioConfig

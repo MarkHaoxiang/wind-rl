@@ -4,12 +4,14 @@ Ranks the policy/critic architectures in the :data:`ModelConfig` union
 (``mlp`` / ``gcn`` / ``set_transformer``) via two fast proxy tasks from
 ``docs/research/2026-07-19-geometric-architectures.md`` S5:
 
-1. **Critic proxy** -- supervised value regression (``critic_proxy.py``). A
-   random-policy dataset of per-agent observations + empirical discounted returns
-   on a fixed FLORIS layout (cached under ``WIND_RL_WDIR``) is regressed by each
-   architecture's critic under an identical optimiser budget; scored by validation
-   MSE and explained variance vs a predict-the-mean baseline.
-2. **Policy proxy** -- fixed-budget MAPPO (``policy_proxy.py``), which delegates to
+1. **Critic proxy** -- supervised value regression
+   (:mod:`wind_rl.experiment.arch_bench.critic`). A random-policy dataset of
+   per-agent observations + empirical discounted returns on a fixed FLORIS layout
+   (cached under ``WIND_RL_WDIR``) is regressed by each architecture's critic under
+   an identical optimiser budget; scored by validation MSE and explained variance
+   vs a predict-the-mean baseline.
+2. **Policy proxy** -- fixed-budget MAPPO
+   (:mod:`wind_rl.experiment.arch_bench.policy`), which delegates to
    the shared :func:`~wind_rl.experiment.sweep.run_sweep` loop: identical-budget
    PPO runs per architecture over several seeds on the same layout, scored by the
    windowed deterministic-eval reward delta and wall-clock.
@@ -30,13 +32,17 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from critic_proxy import CriticProxyConfig, CriticResult, run_critic_proxy
 from numpy.typing import NDArray
-from policy_proxy import run_policy_proxy
 from pydantic import Field
 
 from wind_rl.config import Config
 from wind_rl.design.geometry import is_feasible, sample_feasible_layout
+from wind_rl.experiment.arch_bench.critic import (
+    CriticProxyConfig,
+    CriticResult,
+    run_critic_proxy,
+)
+from wind_rl.experiment.arch_bench.policy import run_policy_proxy
 from wind_rl.experiment.cli import compose_experiment
 from wind_rl.experiment.settings import WindRlSettings
 from wind_rl.experiment.sweep import RunResult, SweepResult
