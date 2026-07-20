@@ -38,6 +38,11 @@ _LOG_PROB_KEY = (GROUP_NAME, "sample_log_prob")
 
 #: Width of the engineered per-agent observation vector (see :class:`_ObservationFeatures`).
 _FEATURE_DIM = 5
+#: Leading (cartesian wind_x, wind_y) entries of the feature vector built by
+#: :class:`_ObservationFeatures`; consumers that reason about the wind direction
+#: (e.g. :mod:`wind_rl.models.transformer`'s wind-frame canonicalisation) slice
+#: this out.
+_WIND_SLICE = slice(0, 2)
 #: Trailing (layout_x, layout_y) entries of the feature vector built by
 #: :class:`_ObservationFeatures`; consumers that need turbine positions (e.g.
 #: :mod:`wind_rl.models.gnn`'s graph construction) slice this out.
