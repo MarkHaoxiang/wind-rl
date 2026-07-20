@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>wind-rl replay</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171b21; --edge: #262c35;
+    --fg: #e6e9ee; --muted: #8b95a3; --accent: #4fd1c5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    padding: 12px;
+  }
+  #app { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 8px; letter-spacing: .02em; }
+  .stage { display: flex; gap: 12px; flex-wrap: wrap; }
+  .card {
+    background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 8px; padding: 10px;
+  }
+  #farmWrap { flex: 1 1 520px; min-width: 300px; position: relative; }
+  #side { flex: 0 0 190px; display: flex; flex-direction: column; gap: 12px; }
+  canvas { display: block; width: 100%; }
+  #farm { border-radius: 4px; cursor: crosshair; }
+  .readout { display: flex; justify-content: space-between; margin: 2px 0; }
+  .readout .k { color: var(--muted); }
+  .readout .v { font-variant-numeric: tabular-nums; }
+  .cbar { height: 12px; border-radius: 3px; margin: 6px 0 2px; }
+  .cbar-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  #controls { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  #controls .grow { flex: 1 1 200px; }
+  button, select {
+    background: var(--edge); color: var(--fg); border: 1px solid #313945;
+    border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover, select:hover { border-color: var(--accent); }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  label.toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); cursor: pointer; }
+  #tip {
+    position: absolute; pointer-events: none; z-index: 5; display: none;
+    background: #0b0e12ee; border: 1px solid var(--edge); border-radius: 6px;
+    padding: 6px 8px; font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  #tip .id { color: var(--accent); font-weight: 600; }
+  #rewardCard { margin-top: 12px; }
+  .chart-title { color: var(--muted); margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>wind-rl &mdash; eval episode replay</h1>
+  <div class="stage">
+    <div id="farmWrap" class="card">
+      <canvas id="farm" height="520"></canvas>
+      <div id="tip"></div>
+    </div>
+    <div id="side">
+      <div class="card">
+        <div class="readout"><span class="k">step</span><span class="v" id="rStep">0</span></div>
+        <div class="readout"><span class="k">wind speed</span><span class="v" id="rWs">&mdash;</span></div>
+        <div class="readout"><span class="k">wind dir</span><span class="v" id="rWd">&mdash;</span></div>
+        <div class="readout"><span class="k">farm power</span><span class="v" id="rPow">&mdash;</span></div>
+        <div class="readout"><span class="k">reward</span><span class="v" id="rRew">&mdash;</span></div>
+        <div class="readout"><span class="k">cumulative</span><span class="v" id="rCum">&mdash;</span></div>
+      </div>
+      <div class="card">
+        <div class="chart-title">turbine power [MW]</div>
+        <div class="cbar" id="powerBar"></div>
+        <div class="cbar-labels"><span id="powLo">0</span><span id="powHi">1</span></div>
+        <div class="chart-title" style="margin-top:8px">wind speed [m/s]</div>
+        <div class="cbar" id="flowBar"></div>
+        <div class="cbar-labels"><span id="flowLo">0</span><span id="flowHi">1</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="rewardCard" class="card">
+    <div class="chart-title">step reward</div>
+    <canvas id="reward" height="130"></canvas>
+  </div>
+
+  <div id="controls">
+    <button id="play">&#9654; Play</button>
+    <input class="grow" id="scrub" type="range" min="0" value="0" step="1" />
+    <select id="speed" title="playback speed">
+      <option value="0.5">0.5&times;</option>
+      <option value="1" selected>1&times;</option>
+      <option value="2">2&times;</option>
+      <option value="4">4&times;</option>
+    </select>
+    <label class="toggle"><input type="checkbox" id="flowToggle" checked /> flow</label>
+  </div>
+</div>
+
+<script>
+"use strict";
+const TRAJECTORY = __TRAJECTORY_JSON__;
+
+// ---- colour maps (anchor stops, linearly interpolated) --------------------
+function ramp(stops) {
+  return function (t) {
+    t = Math.max(0, Math.min(1, t));
+    const x = t * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(x));
+    const f = x - i, a = stops[i], b = stops[i + 1];
+    return [
+      Math.round(a[0] + (b[0] - a[0]) * f),
+      Math.round(a[1] + (b[1] - a[1]) * f),
+      Math.round(a[2] + (b[2] - a[2]) * f),
+    ];
+  };
+}
+const viridis = ramp([[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]]);
+const plasma = ramp([[13,8,135],[126,3,168],[204,71,120],[248,149,64],[240,249,33]]);
+const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+
+function gradientCss(cmap) {
+  const stops = [];
+  for (let i = 0; i <= 8; i++) stops.push(rgb(cmap(i / 8)));
+  return `linear-gradient(90deg, ${stops.join(",")})`;
+}
+
+// ---- data / derived -------------------------------------------------------
+const T = TRAJECTORY.yaw.length;
+const S = TRAJECTORY.static;
+const flow = TRAJECTORY.flow;
+let powMin = Infinity, powMax = -Infinity;
+for (const row of TRAJECTORY.power_mw) for (const p of row) {
+  if (p < powMin) powMin = p; if (p > powMax) powMax = p;
+}
+if (!(powMax > powMin)) powMax = powMin + 1e-6;
+
+// decode base64 flow frames once into Uint8Array grids
+const flowFrames = [];
+if (flow) {
+  for (const b64 of flow.frames) {
+    const bin = atob(b64), arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    flowFrames.push(arr);
+  }
+}
+function flowIndexForStep(step) {
+  if (!flow) return -1;
+  let best = -1;
+  for (let i = 0; i < flow.steps.length; i++) {
+    if (flow.steps[i] <= step) best = i; else break;
+  }
+  return best;
+}
+// offscreen canvas holding the current flow frame at native resolution
+let flowCanvas = null, flowCtx = null;
+if (flow) {
+  flowCanvas = document.createElement("canvas");
+  flowCanvas.width = flow.size; flowCanvas.height = flow.size;
+  flowCtx = flowCanvas.getContext("2d");
+}
+function paintFlow(frameIdx) {
+  const arr = flowFrames[frameIdx];
+  const img = flowCtx.createImageData(flow.size, flow.size);
+  for (let r = 0; r < flow.size; r++) {
+    const row = flow.size - 1 - r;            // flip: image top = high y
+    for (let c = 0; c < flow.size; c++) {
+      const v = arr[row * flow.size + c];
+      const col = viridis(v / 255);
+      const o = (r * flow.size + c) * 4;
+      img.data[o] = col[0]; img.data[o + 1] = col[1];
+      img.data[o + 2] = col[2]; img.data[o + 3] = 255;
+    }
+  }
+  flowCtx.putImageData(img, 0, 0);
+}
+
+// ---- canvas / layout ------------------------------------------------------
+const farm = document.getElementById("farm");
+const fctx = farm.getContext("2d");
+const reward = document.getElementById("reward");
+const rctx = reward.getContext("2d");
+const pad = { l: 46, r: 14, t: 14, b: 34 };
+let plot = { x: 0, y: 0, w: 1, h: 1 };
+
+function fitCanvas(canvas, cssHeight) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth;
+  canvas.width = Math.round(cssWidth * dpr);
+  canvas.height = Math.round(cssHeight * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { w: cssWidth, h: cssHeight };
+}
+
+function layoutFarm() {
+  const size = fitCanvas(farm, 520);
+  const availW = size.w - pad.l - pad.r, availH = size.h - pad.t - pad.b;
+  const aspect = S.map_x / S.map_y;
+  let w = availW, h = w / aspect;
+  if (h > availH) { h = availH; w = h * aspect; }
+  plot = { x: pad.l + (availW - w) / 2, y: pad.t + (availH - h) / 2, w, h };
+}
+
+const wx = (x) => plot.x + (x / S.map_x) * plot.w;
+const wy = (y) => plot.y + plot.h - (y / S.map_y) * plot.h;
+
+// ---- draw farm ------------------------------------------------------------
+function drawFarm(step) {
+  fctx.clearRect(0, 0, farm.width, farm.height);
+  fctx.fillStyle = "#0b0e12";
+  fctx.fillRect(plot.x, plot.y, plot.w, plot.h);
+
+  const showFlow = document.getElementById("flowToggle").checked;
+  const fi = flowIndexForStep(step);
+  if (showFlow && fi >= 0) {
+    paintFlow(fi);
+    fctx.imageSmoothingEnabled = true;
+    fctx.drawImage(flowCanvas, plot.x, plot.y, plot.w, plot.h);
+  }
+
+  // axes frame + ticks
+  fctx.strokeStyle = "#2b323c"; fctx.lineWidth = 1;
+  fctx.strokeRect(plot.x, plot.y, plot.w, plot.h);
+  fctx.fillStyle = "#8b95a3"; fctx.font = "11px system-ui";
+  fctx.textAlign = "center"; fctx.textBaseline = "top";
+  for (let k = 0; k <= 4; k++) {
+    const xv = (S.map_x * k) / 4;
+    fctx.fillText(Math.round(xv).toString(), wx(xv), plot.y + plot.h + 6);
+  }
+  fctx.textAlign = "right"; fctx.textBaseline = "middle";
+  for (let k = 0; k <= 4; k++) {
+    const yv = (S.map_y * k) / 4;
+    fctx.fillText(Math.round(yv).toString(), plot.x - 6, wy(yv));
+  }
+
+  drawWind(step);
+
+  // turbines
+  const yaw = TRAJECTORY.yaw[step], pw = TRAJECTORY.power_mw[step];
+  const phi = (TRAJECTORY.wind_dir[step] * Math.PI) / 180;
+  const nacL = S.rotor_diameter;
+  for (let i = 0; i < S.n_turbines; i++) {
+    const [x, y] = S.layout[i];
+    const cx = wx(x), cy = wy(y);
+    // nacelle axis: upwind unit turned by yaw offset (see render.py)
+    const facing = phi - (yaw[i] * Math.PI) / 180;
+    const dx = Math.sin(facing), dy = Math.cos(facing);
+    fctx.strokeStyle = "#ff5252"; fctx.lineWidth = 2.5;
+    fctx.beginPath();
+    fctx.moveTo(wx(x - dx * nacL * 0.5), wy(y - dy * nacL * 0.5));
+    fctx.lineTo(wx(x + dx * nacL * 0.5), wy(y + dy * nacL * 0.5));
+    fctx.stroke();
+
+    const t = (pw[i] - powMin) / (powMax - powMin);
+    fctx.fillStyle = rgb(plasma(t));
+    fctx.strokeStyle = "#0b0e12"; fctx.lineWidth = 1.5;
+    fctx.beginPath(); fctx.arc(cx, cy, 7, 0, 2 * Math.PI);
+    fctx.fill(); fctx.stroke();
+
+    fctx.fillStyle = "#0b0e12"; fctx.font = "bold 9px system-ui";
+    fctx.textAlign = "center"; fctx.textBaseline = "middle";
+    fctx.fillText(i.toString(), cx, cy);
+  }
+}
+
+function drawWind(step) {
+  const phi = (TRAJECTORY.wind_dir[step] * Math.PI) / 180;
+  // air flows towards (-sin phi, -cos phi) in map coords
+  const fdx = -Math.sin(phi), fdy = -Math.cos(phi);
+  const bx = plot.x + 30, by = plot.y + 30, len = 22;
+  const tx = bx + fdx * len, ty = by - fdy * len;   // canvas y is flipped
+  fctx.strokeStyle = "#e6e9ee"; fctx.fillStyle = "#e6e9ee"; fctx.lineWidth = 2;
+  fctx.beginPath(); fctx.moveTo(bx, by); fctx.lineTo(tx, ty); fctx.stroke();
+  const ang = Math.atan2(ty - by, tx - bx);
+  fctx.beginPath();
+  fctx.moveTo(tx, ty);
+  fctx.lineTo(tx - 7 * Math.cos(ang - 0.4), ty - 7 * Math.sin(ang - 0.4));
+  fctx.lineTo(tx - 7 * Math.cos(ang + 0.4), ty - 7 * Math.sin(ang + 0.4));
+  fctx.closePath(); fctx.fill();
+  fctx.font = "10px system-ui"; fctx.textAlign = "left"; fctx.textBaseline = "top";
+  fctx.fillText("wind", plot.x + 6, plot.y + 6);
+}
+
+// ---- reward strip chart ---------------------------------------------------
+function drawReward(step) {
+  const size = fitCanvas(reward, 130);
+  const r = TRAJECTORY.reward;
+  const px = { l: 46, r: 14, t: 10, b: 22 };
+  const w = size.w - px.l - px.r, h = size.h - px.t - px.b;
+  let lo = Math.min(...r), hi = Math.max(...r);
+  if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
+  const sx = (i) => px.l + (T <= 1 ? 0 : (i / (T - 1)) * w);
+  const sy = (v) => px.t + h - ((v - lo) / (hi - lo)) * h;
+
+  rctx.clearRect(0, 0, reward.width, reward.height);
+  rctx.strokeStyle = "#2b323c"; rctx.lineWidth = 1;
+  rctx.beginPath(); rctx.moveTo(px.l, px.t); rctx.lineTo(px.l, px.t + h);
+  rctx.lineTo(px.l + w, px.t + h); rctx.stroke();
+  rctx.fillStyle = "#8b95a3"; rctx.font = "10px system-ui";
+  rctx.textAlign = "right"; rctx.textBaseline = "middle";
+  rctx.fillText(hi.toFixed(2), px.l - 5, px.t);
+  rctx.fillText(lo.toFixed(2), px.l - 5, px.t + h);
+
+  rctx.strokeStyle = "#4fd1c5"; rctx.lineWidth = 1.8; rctx.beginPath();
+  for (let i = 0; i < T; i++) {
+    const X = sx(i), Y = sy(r[i]);
+    if (i === 0) rctx.moveTo(X, Y); else rctx.lineTo(X, Y);
+  }
+  rctx.stroke();
+
+  const cx = sx(step);
+  rctx.strokeStyle = "#e6e9ee88"; rctx.setLineDash([3, 3]);
+  rctx.beginPath(); rctx.moveTo(cx, px.t); rctx.lineTo(cx, px.t + h); rctx.stroke();
+  rctx.setLineDash([]);
+  rctx.fillStyle = "#e6e9ee";
+  rctx.beginPath(); rctx.arc(cx, sy(r[step]), 3, 0, 2 * Math.PI); rctx.fill();
+}
+
+// ---- readouts -------------------------------------------------------------
+function updateReadouts(step) {
+  const pw = TRAJECTORY.power_mw[step];
+  const farmPow = pw.reduce((a, b) => a + b, 0);
+  document.getElementById("rStep").textContent = step + " / " + (T - 1);
+  document.getElementById("rWs").textContent = TRAJECTORY.wind_speed[step].toFixed(2) + " m/s";
+  document.getElementById("rWd").textContent = TRAJECTORY.wind_dir[step].toFixed(0) + "°";
+  document.getElementById("rPow").textContent = farmPow.toFixed(3) + " MW";
+  document.getElementById("rRew").textContent = TRAJECTORY.reward[step].toFixed(3);
+  document.getElementById("rCum").textContent = TRAJECTORY.cumulative_reward[step].toFixed(3);
+}
+
+// ---- render + playback ----------------------------------------------------
+let step = 0, playing = false, last = 0, acc = 0;
+function render() { drawFarm(step); drawReward(step); updateReadouts(step); }
+function setStep(s) {
+  step = Math.max(0, Math.min(T - 1, s | 0));
+  document.getElementById("scrub").value = step;
+  render();
+}
+function tick(now) {
+  if (playing) {
+    const speed = parseFloat(document.getElementById("speed").value);
+    acc += ((now - last) / 1000) * speed * 4;    // ~4 steps/s at 1x
+    if (acc >= 1) {
+      let ns = step + Math.floor(acc); acc -= Math.floor(acc);
+      if (ns >= T - 1) { ns = T - 1; setPlaying(false); }
+      setStep(ns);
+    }
+  }
+  last = now;
+  requestAnimationFrame(tick);
+}
+function setPlaying(p) {
+  playing = p;
+  if (p && step >= T - 1) setStep(0);
+  document.getElementById("play").innerHTML = p ? "&#10073;&#10073; Pause" : "&#9654; Play";
+}
+
+// ---- tooltip --------------------------------------------------------------
+const tip = document.getElementById("tip");
+farm.addEventListener("mousemove", (e) => {
+  const rect = farm.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let hit = -1, best = 14 * 14;
+  for (let i = 0; i < S.n_turbines; i++) {
+    const [x, y] = S.layout[i];
+    const dx = mx - wx(x), dy = my - wy(y), d = dx * dx + dy * dy;
+    if (d < best) { best = d; hit = i; }
+  }
+  if (hit < 0) { tip.style.display = "none"; return; }
+  tip.style.display = "block";
+  tip.style.left = (mx + 12) + "px";
+  tip.style.top = (my + 12) + "px";
+  tip.innerHTML = `<span class="id">turbine ${hit}</span><br>` +
+    `yaw ${TRAJECTORY.yaw[step][hit].toFixed(1)}°<br>` +
+    `power ${TRAJECTORY.power_mw[step][hit].toFixed(3)} MW`;
+});
+farm.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+
+// ---- wiring ---------------------------------------------------------------
+document.getElementById("scrub").max = T - 1;
+document.getElementById("scrub").addEventListener("input", (e) => {
+  setPlaying(false); setStep(parseInt(e.target.value, 10));
+});
+document.getElementById("play").addEventListener("click", () => setPlaying(!playing));
+document.getElementById("flowToggle").addEventListener("change", render);
+document.getElementById("powerBar").style.background = gradientCss(plasma);
+document.getElementById("powLo").textContent = powMin.toFixed(2);
+document.getElementById("powHi").textContent = powMax.toFixed(2);
+const flowBar = document.getElementById("flowBar");
+if (flow) {
+  flowBar.style.background = gradientCss(viridis);
+  document.getElementById("flowLo").textContent = flow.vmin.toFixed(2);
+  document.getElementById("flowHi").textContent = flow.vmax.toFixed(2);
+} else {
+  flowBar.parentElement.style.display = "none";
+  document.getElementById("flowToggle").parentElement.style.display = "none";
+}
+
+function onResize() { layoutFarm(); render(); }
+window.addEventListener("resize", onResize);
+layoutFarm();
+setStep(0);
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

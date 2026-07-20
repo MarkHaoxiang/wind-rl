@@ -35,6 +35,7 @@ from wind_rl.rl.mappo import PPOConfig, build_loss_module, build_optimiser
 from wind_rl.scenario import ScenarioConfig
 from wind_rl.static import GROUP_NAME
 from wind_rl.utils import resolve_device, seed_all
+from wind_rl.viz import build_replay_html, record_episode
 
 _REWARD_KEY = (GROUP_NAME, "reward")
 _EPISODE_REWARD_KEY = (GROUP_NAME, "episode_reward")
@@ -48,6 +49,8 @@ _GAUSSIAN_ENTROPY_CONST = 0.5 * math.log(2.0 * math.pi * math.e)
 class LoggingConfig(Config):
     project: str = "wind-rl-mappo"
     use_wandb: bool = False
+    #: Log an interactive HTML replay of an eval episode (only when wandb is live).
+    replay: bool = True
 
 
 class TrainingConfig(Config):
@@ -80,6 +83,7 @@ class _EvalResult(NamedTuple):
     reward_mean: float
     reward_std: float
     image: NDArray[np.uint8] | None
+    replay_html: str | None
 
 
 def _layout_array(cfg: TrainingConfig) -> NDArray[np.float64] | None:
@@ -156,7 +160,7 @@ class MappoTrainer:
             device=str(self.device),
         )
 
-    def _eval(self, policy: torch.nn.Module) -> _EvalResult:
+    def _eval(self, policy: torch.nn.Module, record_replay: bool) -> _EvalResult:
         env = self._make_env("eval")
         rewards = []
         with torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
@@ -167,11 +171,13 @@ class MappoTrainer:
                 rewards.append(float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean()))
         # Render the live wake-resolved flow field before the env is torn down.
         render = _render_eval(env)
+        replay_html = _record_replay(env, policy) if record_replay else None
         env.close()
         return _EvalResult(
             float(np.mean(rewards)),
             float(np.std(rewards)),
             render,
+            replay_html,
         )
 
     def _save_checkpoint(
@@ -282,15 +288,18 @@ class MappoTrainer:
                     )
 
                 images: dict[str, NDArray[np.uint8]] = {}
+                html: dict[str, str] = {}
                 eval_s = 0.0
                 if iteration % cfg.eval_interval == 0:
                     t0 = time.perf_counter()
-                    result = self._eval(policy)
+                    result = self._eval(policy, cfg.logging.replay and logger.enabled)
                     eval_s = time.perf_counter() - t0
                     metrics["eval/episode_reward_mean"] = result.reward_mean
                     metrics["eval/episode_reward_std"] = result.reward_std
                     if result.image is not None:
                         images["eval/layout"] = result.image
+                    if result.replay_html is not None:
+                        html["eval/replay"] = result.replay_html
 
                 is_final = iteration == cfg.n_iters - 1
                 checkpoint_path: Path | None = None
@@ -306,7 +315,7 @@ class MappoTrainer:
                 metrics["time/eval_s"] = eval_s
                 metrics["time/iter_s"] = time.perf_counter() - t_prev
 
-                logger.log(metrics, images=images or None)
+                logger.log(metrics, images=images or None, html=html or None)
                 if is_final and checkpoint_path is not None:
                     logger.log_artifact(
                         checkpoint_path, name=f"{cfg.experiment_name}-checkpoint"
@@ -344,4 +353,12 @@ def _render_eval(env: object) -> NDArray[np.uint8] | None:
     try:
         return render_farm(env.base_env.designable_env)  # type: ignore[attr-defined]
     except Exception:  # pragma: no cover - render is best-effort telemetry
+        return None
+
+
+def _record_replay(env: TransformedEnv, policy: torch.nn.Module) -> str | None:
+    try:
+        traj = record_episode(env, policy)
+        return build_replay_html(traj)
+    except Exception:  # pragma: no cover - replay is best-effort telemetry
         return None

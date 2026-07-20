@@ -68,6 +68,10 @@ class RunLogger:
         self._run.define_metric("*", step_metric=X_AXIS_METRIC)
 
     @property
+    def enabled(self) -> bool:
+        return self._run is not None
+
+    @property
     def url(self) -> str | None:
         return None if self._run is None else self._run.url
 
@@ -75,6 +79,7 @@ class RunLogger:
         self,
         metrics: dict[str, float],
         images: dict[str, NDArray[np.uint8]] | None = None,
+        html: dict[str, str] | None = None,
     ) -> None:
         if self._run is None:
             return
@@ -83,6 +88,8 @@ class RunLogger:
         payload: dict[str, object] = dict(metrics)
         for key, image in (images or {}).items():
             payload[key] = wandb.Image(image)
+        for key, document in (html or {}).items():
+            payload[key] = wandb.Html(document, inject=False)
         self._run.log(payload)
 
     def log_artifact(self, path: Path, name: str, artifact_type: str = "model") -> None:
