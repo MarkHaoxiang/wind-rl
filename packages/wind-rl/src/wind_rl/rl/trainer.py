@@ -7,6 +7,7 @@ consumer (the FLORIS MLP smoke experiment), so this is one small class over
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import math
 import shutil
@@ -39,7 +40,12 @@ from wind_rl.env.render import render_farm
 from wind_rl.experiment.settings import WindRlSettings
 from wind_rl.models import ModelConfig, build_actor_critic
 from wind_rl.models.mlp import MlpModelConfig
-from wind_rl.rl.logging import RunLogger, explained_variance
+from wind_rl.rl.logging import (
+    RunLogger,
+    checkpoint_aliases,
+    explained_variance,
+    param_norms,
+)
 from wind_rl.rl.mappo import PPOConfig, build_loss_module, build_optimiser
 from wind_rl.scenario import ScenarioConfig
 from wind_rl.static import GROUP_NAME
@@ -62,6 +68,16 @@ class LoggingConfig(Config):
     use_wandb: bool = False
     #: Log an interactive HTML replay of an eval episode (only when wandb is live).
     replay: bool = True
+    #: Upload every checkpoint saved on iterations divisible by this to wandb as
+    #: a versioned artifact (aliased ``iter-<N>``), so a killed run still has
+    #: recent weights in wandb rather than only local disk. ``None`` disables
+    #: periodic uploads (final checkpoint only, as before). Only evaluated on
+    #: iterations where ``checkpoint_interval`` actually saved a checkpoint, so
+    #: values not a multiple of it round up to the next saved iteration. The
+    #: default of 1 uploads every checkpoint -- fine at the default
+    #: ``checkpoint_interval=1``/short smoke runs, but chatty for long runs
+    #: with frequent checkpointing; raise it alongside ``checkpoint_interval``.
+    checkpoint_upload_interval: int | None = 1
 
 
 class TrainingConfig(Config):
@@ -321,6 +337,9 @@ class MappoTrainer:
         logger = RunLogger(cfg, self.settings)
         history: list[dict[str, float]] = []
         t_prev = time.perf_counter()
+        latest_checkpoint_path: Path | None = None
+        latest_checkpoint_iteration: int | None = None
+        latest_checkpoint_uploaded = False
         try:
             for iteration, data in enumerate(collector):
                 collect_s = time.perf_counter() - t_prev
@@ -401,6 +420,19 @@ class MappoTrainer:
                         images["eval/layout"] = result.image
                     if result.replay_html is not None:
                         html["eval/replay"] = result.replay_html
+                    # Cheap (no forward pass) weight telemetry at eval cadence.
+                    metrics.update(
+                        {
+                            f"weights/policy/{k}": v
+                            for k, v in param_norms(policy).items()
+                        }
+                    )
+                    metrics.update(
+                        {
+                            f"weights/critic/{k}": v
+                            for k, v in param_norms(critic).items()
+                        }
+                    )
 
                 is_final = iteration == cfg.n_iters - 1
                 checkpoint_path: Path | None = None
@@ -410,6 +442,10 @@ class MappoTrainer:
                     )
                 if is_final:
                     checkpoint_path = self._save_checkpoint(policy, critic, "final")
+                if checkpoint_path is not None:
+                    latest_checkpoint_path = checkpoint_path
+                    latest_checkpoint_iteration = iteration
+                    latest_checkpoint_uploaded = False
 
                 metrics["time/collect_s"] = collect_s
                 metrics["time/update_s"] = update_s
@@ -417,10 +453,16 @@ class MappoTrainer:
                 metrics["time/iter_s"] = time.perf_counter() - t_prev
 
                 logger.log(metrics, images=images or None, html=html or None)
-                if is_final and checkpoint_path is not None:
+                aliases = checkpoint_aliases(
+                    iteration, cfg.logging.checkpoint_upload_interval, is_final=is_final
+                )
+                if checkpoint_path is not None and aliases:
                     logger.log_artifact(
-                        checkpoint_path, name=f"{cfg.experiment_name}-checkpoint"
+                        checkpoint_path,
+                        name=f"{cfg.experiment_name}-checkpoint",
+                        aliases=aliases,
                     )
+                    latest_checkpoint_uploaded = True
                 history.append(metrics)
                 t_prev = time.perf_counter()
         finally:
@@ -428,6 +470,19 @@ class MappoTrainer:
             ref_env.close()
             if buffer_dir is not None:
                 shutil.rmtree(buffer_dir, ignore_errors=True)
+            if (
+                logger.enabled
+                and latest_checkpoint_path is not None
+                and not latest_checkpoint_uploaded
+            ):
+                # Best-effort: a crash or kill between periodic uploads should
+                # not leave wandb with metrics but zero weights.
+                with contextlib.suppress(Exception):  # pragma: no cover - teardown-only
+                    logger.log_artifact(
+                        latest_checkpoint_path,
+                        name=f"{cfg.experiment_name}-checkpoint",
+                        aliases=[f"iter-{latest_checkpoint_iteration}", "interrupted"],
+                    )
             logger.finish()
 
         return history
