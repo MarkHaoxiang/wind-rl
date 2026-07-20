@@ -15,6 +15,7 @@ from torchrl.envs.utils import check_env_specs
 pytest.importorskip("wfcrl")
 
 from wind_rl.env import RewardNormalisation, make_env, render_farm
+from wind_rl.env.flow import read_farm_state, sample_plane
 from wind_rl.scenario import ScenarioConfig
 
 pytestmark = pytest.mark.sim
@@ -145,9 +146,45 @@ def test_render_farm_returns_rgb(scenario: ScenarioConfig) -> None:
     assert image.dtype == np.uint8
 
 
-def test_render_farm_flow_field_responds_to_wind(scenario: ScenarioConfig) -> None:
-    """The wake-resolved flow field is real: two wind directions differ pixel-wise."""
-    image_west = _render_at_wind(scenario, (270.0, 8.0))
-    image_sw = _render_at_wind(scenario, (200.0, 8.0))
-    assert image_west.shape == image_sw.shape
-    assert not np.array_equal(image_west, image_sw)
+def _mean_flow_direction(
+    scenario: ScenarioConfig, wind: tuple[float, float]
+) -> NDArray[np.float64]:
+    env = make_env("train", scenario)
+    env.base_env.set_layout_override(_RENDER_LAYOUT)
+    env.base_env.set_wind_override(wind)
+    env.reset()
+    designable = env.base_env.designable_env
+    state = read_farm_state(designable)
+    _, _, u, v = sample_plane(
+        designable.floris,
+        hub_height=state.hub_height,
+        bounds=(scenario.map_x_length, scenario.map_y_length),
+        yaw=state.yaw,
+        wind_speed=state.wind_speed,
+        wind_dir=state.wind_dir,
+        resolution=64,
+        fill="nan",
+    )
+    env.close()
+    mean = np.array([np.nanmean(u), np.nanmean(v)], dtype=np.float64)
+    return np.asarray(mean / np.hypot(*mean), dtype=np.float64)
+
+
+def test_flow_field_velocity_is_map_frame_across_wind_directions(
+    scenario: ScenarioConfig,
+) -> None:
+    """sample_plane's (u, v) point along the meteorological inflow in the MAP
+    frame for every wind direction -- including off-axis, where treating FLORIS's
+    wind-aligned components as map-frame (bug A) would leave the field pointing +x."""
+    # West (270): air flows +x/east; this is the on-axis no-op case.
+    west = _mean_flow_direction(scenario, (270.0, 8.0))
+    np.testing.assert_allclose(west, [1.0, 0.0], atol=0.1)
+
+    # Off-axis (315, from the NW): air flows towards (-sin phi, -cos phi).
+    phi = np.deg2rad(315.0)
+    expected = np.array([-np.sin(phi), -np.cos(phi)])
+    off_axis = _mean_flow_direction(scenario, (315.0, 8.0))
+    # Un-rotated, off_axis would still be ~+x, giving cos-sim ~0.71 -- fails here.
+    assert float(off_axis @ expected) > 0.98
+    # The field genuinely rotates with the wind (responds, not just a title swap).
+    assert float(west @ off_axis) < 0.8

@@ -1,25 +1,11 @@
 """Wake-resolved wind-farm visualiser -> RGB array (for wandb / debugging).
 
-The centrepiece is the *wake-resolved* horizontal flow field: the live FLORIS
-interface owned by the env computes a hub-height cut-plane of the velocity field,
-so the streaks of slowed air behind each turbine (and their deflection under yaw)
-are visible -- exactly what wake-steering research needs to see. On top of the
-flow field we draw the turbines coloured by power, their nacelle/yaw orientation,
-index labels, and a wind indicator.
-
-Angle conventions (derived from wfcrl/FLORIS, all degrees):
-
-* ``wind_direction`` is meteorological -- the compass bearing the wind blows
-  *from*. So the air flows *towards* the unit vector ``(-sin phi, -cos phi)`` in
-  map ``(x, y)`` coordinates (phi = 270 => wind from the west, flowing +x/east).
-* ``yaw`` is relative to the inflow: a turbine at zero yaw faces straight into the
-  wind (nacelle axis along the upwind unit ``(sin phi, cos phi)``). Positive yaw
-  rotates the nacelle counter-clockwise from that upwind direction (FLORIS sign),
-  which is what deflects the wake sideways.
-
-FLORIS returns the cut-plane velocity components ``u, v`` already in the inertial
-map frame (verified: phi=270 gives ``u ~ +ws``, ``v ~ 0``), so they can be drawn
-directly over the ``(x, y)`` grid with no extra rotation.
+The centrepiece is the *wake-resolved* horizontal flow field (see
+:mod:`wind_rl.env.flow` for the velocity/angle-frame conventions): the streaks
+of slowed air behind each turbine (and their deflection under yaw) are visible
+-- exactly what wake-steering research needs to see. On top of the flow field we
+draw the turbines coloured by power, their nacelle/yaw orientation, index
+labels, and a wind indicator.
 """
 
 from __future__ import annotations
@@ -39,10 +25,14 @@ from matplotlib.patches import Circle
 from numpy.typing import NDArray
 
 from wind_rl.config import Config
+from wind_rl.env.flow import (
+    FlorisPlaneSource,
+    ambient_uv,
+    read_farm_state,
+    sample_plane,
+)
 
 if TYPE_CHECKING:
-    from floris.tools import FlorisInterface as FlorisSimulator
-
     from wind_rl.env.windfarm import DesignableWindFarmEnv
 
 
@@ -79,17 +69,7 @@ def render_farm(
     if scenario is None:  # pragma: no cover - defensive; make_env always sets it
         raise ValueError("render_farm requires env.scenario to be set")
 
-    fi = env.floris
-    interface = env.mdp.interface
-    layout = np.column_stack([np.asarray(fi.layout_x), np.asarray(fi.layout_y)])
-    n_turbines = layout.shape[0]
-    yaw = np.asarray(interface.get_yaw_command(), dtype=float).reshape(n_turbines)
-    powers = np.asarray(interface.avg_powers(), dtype=float).reshape(n_turbines)
-    wind_speed = float(np.asarray(interface.wind_speed).reshape(-1)[0])
-    wind_dir = float(np.asarray(interface.wind_dir).reshape(-1)[0])
-    hub_height = float(np.asarray(fi.floris.farm.hub_heights).reshape(-1)[0])
-    rotor_diameter = float(np.asarray(fi.floris.farm.rotor_diameters).reshape(-1)[0])
-
+    state = read_farm_state(env)
     map_x = scenario.map_x_length
     map_y = scenario.map_y_length
 
@@ -102,26 +82,26 @@ def render_farm(
 
     _draw_flow_field(
         ax,
-        fi,
-        yaw=yaw,
-        hub_height=hub_height,
+        env.floris,
+        yaw=state.yaw,
+        hub_height=state.hub_height,
         bounds=(map_x, map_y),
-        wind_speed=wind_speed,
-        wind_dir=wind_dir,
+        wind_speed=state.wind_speed,
+        wind_dir=state.wind_dir,
         cfg=cfg,
     )
     _draw_turbines(
         ax,
         fig,
-        layout=layout,
-        powers=powers,
-        yaw=yaw,
-        wind_dir=wind_dir,
-        rotor_diameter=rotor_diameter,
+        layout=state.layout,
+        powers_mw=state.powers_mw,
+        yaw=state.yaw,
+        wind_dir=state.wind_dir,
+        rotor_diameter=state.rotor_diameter,
         min_distance=scenario.min_distance_between_turbines,
         cfg=cfg,
     )
-    _draw_wind_indicator(ax, wind_dir=wind_dir)
+    _draw_wind_indicator(ax, wind_dir=state.wind_dir)
 
     ax.set_xlim(0.0, map_x)
     ax.set_ylim(0.0, map_y)
@@ -129,8 +109,8 @@ def render_farm(
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")
     ax.set_title(
-        f"Farm power {powers.sum() / 1e6:.2f} MW   |   "
-        f"wind {wind_speed:.1f} m/s @ {wind_dir:.0f}\N{DEGREE SIGN}"
+        f"Farm power {state.powers_mw.sum():.2f} MW   |   "
+        f"wind {state.wind_speed:.1f} m/s @ {state.wind_dir:.0f}\N{DEGREE SIGN}"
     )
 
     fig.tight_layout()
@@ -145,7 +125,7 @@ def render_farm(
 
 def _draw_flow_field(
     ax: Axes,
-    fi: FlorisSimulator,
+    fi: FlorisPlaneSource,
     *,
     yaw: NDArray[np.float64],
     hub_height: float,
@@ -156,35 +136,29 @@ def _draw_flow_field(
 ) -> None:
     """Speed heatmap + streamlines of the wake-resolved hub-height plane.
 
-    FLORIS samples the plane on a wind-aligned grid, so for off-axis wind the
-    returned ``(x1, x2)`` map-frame points are a rotated (non-axis-aligned) grid.
-    We interpolate the scattered ``(u, v)`` onto a regular map-frame grid (via
-    ``matplotlib.tri``, dependency-free) so ``streamplot`` -- which needs a
-    monotone grid -- works for every wind direction. Falls back to a uniform
-    free-stream field if the cut-plane extraction raises.
+    Falls back to a uniform free-stream field if the cut-plane extraction raises
+    (or is disabled), so the field is always a real vector field.
     """
     map_x, map_y = bounds
     res = cfg.flow_resolution
     grid_x, grid_y = np.meshgrid(
         np.linspace(0.0, map_x, res), np.linspace(0.0, map_y, res)
     )
-    u, v = _uniform_uv(grid_x, wind_speed, wind_dir)
+    u, v = ambient_uv(grid_x, wind_speed, wind_dir)
     if cfg.show_flow_field:
         try:
-            plane = fi.calculate_horizontal_plane(
-                height=hub_height,
-                x_resolution=res,
-                y_resolution=res,
-                x_bounds=(0.0, map_x),
-                y_bounds=(0.0, map_y),
-                yaw_angles=yaw.reshape(1, 1, -1),
+            grid_x, grid_y, u, v = sample_plane(
+                fi,
+                hub_height=hub_height,
+                bounds=bounds,
+                yaw=yaw,
+                wind_speed=wind_speed,
+                wind_dir=wind_dir,
+                resolution=res,
+                fill="nan",
             )
-            px = np.asarray(plane.df.x1.values, dtype=np.float64)
-            py = np.asarray(plane.df.x2.values, dtype=np.float64)
-            u = _interpolate_to_grid(px, py, plane.df.u.values, grid_x, grid_y)
-            v = _interpolate_to_grid(px, py, plane.df.v.values, grid_x, grid_y)
         except Exception:  # pragma: no cover - fall back to ambient uniform field
-            u, v = _uniform_uv(grid_x, wind_speed, wind_dir)
+            u, v = ambient_uv(grid_x, wind_speed, wind_dir)
 
     speed = np.hypot(u, v)
     ax.pcolormesh(
@@ -217,42 +191,12 @@ def _draw_flow_field(
         )
 
 
-def _interpolate_to_grid(
-    px: NDArray[np.float64],
-    py: NDArray[np.float64],
-    values: NDArray[np.float64],
-    grid_x: NDArray[np.float64],
-    grid_y: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    """Linearly interpolate a scattered field onto a regular grid.
-
-    Points outside the sampled (rotated) hull become NaN.
-    """
-    from matplotlib.tri import LinearTriInterpolator, Triangulation
-
-    tri = Triangulation(px, py)
-    out = LinearTriInterpolator(tri, np.asarray(values, dtype=np.float64))(
-        grid_x, grid_y
-    )
-    return np.asarray(np.ma.filled(out, np.nan), dtype=np.float64)
-
-
-def _uniform_uv(
-    grid_x: NDArray[np.float64], wind_speed: float, wind_dir: float
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """A uniform free-stream ``(u, v)`` field (ambient-wind fallback)."""
-    phi = np.deg2rad(wind_dir)
-    u = np.full_like(grid_x, -wind_speed * np.sin(phi))
-    v = np.full_like(grid_x, -wind_speed * np.cos(phi))
-    return u, v
-
-
 def _draw_turbines(
     ax: Axes,
     fig: Figure,
     *,
     layout: NDArray[np.float64],
-    powers: NDArray[np.float64],
+    powers_mw: NDArray[np.float64],
     yaw: NDArray[np.float64],
     wind_dir: float,
     rotor_diameter: float,
@@ -261,7 +205,6 @@ def _draw_turbines(
 ) -> None:
     """Turbine markers coloured by power, yaw-oriented nacelle lines, labels."""
     xs, ys = layout[:, 0], layout[:, 1]
-    powers_mw = powers / 1e6
 
     # Nacelle axis: the upwind unit (sin phi, cos phi) turned by the yaw offset.
     facing = np.deg2rad(wind_dir - yaw)

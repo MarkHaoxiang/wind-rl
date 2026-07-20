@@ -6,10 +6,7 @@ step -- yaw command, per-turbine power, free-stream wind -- and, optionally, a
 downsampled hub-height flow-speed snapshot. The resulting :class:`ReplayTrajectory`
 round-trips through JSON and is consumed by :func:`wind_rl.viz.player.build_replay_html`.
 
-Angle conventions match :mod:`wind_rl.env.render` (meteorological, degrees):
-``wind_dir`` is the bearing the wind blows *from*; the air flows towards
-``(-sin phi, -cos phi)`` in map ``(x, y)``. A turbine's nacelle axis is the upwind
-unit turned by its yaw offset: ``(sin(phi - yaw*pi/180), cos(...))``.
+Coordinate/angle-frame conventions live in :mod:`wind_rl.env.flow`.
 
 Flow snapshots are stored as base64 ``uint8`` grids (row-major, row index = y,
 column index = x) linearly quantised over the global ``[vmin, vmax]`` speed range,
@@ -27,6 +24,7 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict
 from torchrl.envs.utils import ExplorationType, set_exploration_type, step_mdp
 
+from wind_rl.env.flow import read_farm_state, sample_plane
 from wind_rl.static import GROUP_NAME
 
 if TYPE_CHECKING:
@@ -98,14 +96,9 @@ def record_episode(
     """
     cfg = config or RecordConfig()
     designable = env.base_env.designable_env
-    fi = designable.floris
-    interface = designable.mdp.interface
     scenario = designable.scenario
-    hub_height = float(np.asarray(fi.floris.farm.hub_heights).reshape(-1)[0])
-    rotor_diameter = float(np.asarray(fi.floris.farm.rotor_diameters).reshape(-1)[0])
-    n_turbines = int(scenario.n_turbines)
-
-    layout0 = np.column_stack([np.asarray(fi.layout_x), np.asarray(fi.layout_y)])
+    bounds = (scenario.map_x_length, scenario.map_y_length)
+    static = read_farm_state(designable)
 
     yaw: list[list[float]] = []
     power_mw: list[list[float]] = []
@@ -116,55 +109,47 @@ def record_episode(
     flow_steps: list[int] = []
     flow_grids: list[NDArray[np.float64]] = []
 
-    action_key = env.action_key
     with set_exploration_type(ExplorationType.DETERMINISTIC):
         td = env.reset()
         for step in range(scenario.max_steps):
             td = policy(td)
             td = env.step(td)
 
-            step_yaw = np.asarray(interface.get_yaw_command(), dtype=float).reshape(
-                n_turbines
-            )
-            step_power = np.asarray(interface.avg_powers(), dtype=float).reshape(
-                n_turbines
-            )
-            ws = float(np.asarray(interface.wind_speed).reshape(-1)[0])
-            wd = float(np.asarray(interface.wind_dir).reshape(-1)[0])
-
-            yaw.append(step_yaw.tolist())
-            power_mw.append((step_power / 1e6).tolist())
-            wind_speed.append(ws)
-            wind_dir.append(wd)
+            state = read_farm_state(designable)
+            yaw.append(state.yaw.tolist())
+            power_mw.append(state.powers_mw.tolist())
+            wind_speed.append(state.wind_speed)
+            wind_dir.append(state.wind_dir)
             reward.append(float(td[_REWARD_KEY].mean()))
             cumulative.append(float(td[_EPISODE_REWARD_KEY].mean()))
 
             if cfg.capture_flow and step % cfg.flow_every == 0:
-                grid = _sample_speed_grid(
-                    fi,
-                    yaw=step_yaw,
-                    hub_height=hub_height,
-                    bounds=(scenario.map_x_length, scenario.map_y_length),
-                    wind_speed=ws,
+                _, _, u, v = sample_plane(
+                    designable.floris,
+                    hub_height=static.hub_height,
+                    bounds=bounds,
+                    yaw=state.yaw,
+                    wind_speed=state.wind_speed,
+                    wind_dir=state.wind_dir,
                     resolution=cfg.flow_size,
+                    fill="ambient",
                 )
                 flow_steps.append(step)
-                flow_grids.append(grid)
+                flow_grids.append(np.hypot(u, v))
 
             if bool(td[_DONE_KEY].any()):
                 break
             td = step_mdp(td)
 
-    _ = action_key  # env.step consumes the action written by policy under this key
     flow = _pack_flow(flow_grids, flow_steps, cfg.flow_size) if flow_grids else None
     return ReplayTrajectory(
         static=ReplayStatic(
             map_x=float(scenario.map_x_length),
             map_y=float(scenario.map_y_length),
-            n_turbines=n_turbines,
+            n_turbines=int(scenario.n_turbines),
             min_distance=float(scenario.min_distance_between_turbines),
-            rotor_diameter=rotor_diameter,
-            layout=layout0.astype(float).tolist(),
+            rotor_diameter=static.rotor_diameter,
+            layout=static.layout.astype(float).tolist(),
         ),
         yaw=yaw,
         power_mw=power_mw,
@@ -174,48 +159,6 @@ def record_episode(
         cumulative_reward=cumulative,
         flow=flow,
     )
-
-
-def _sample_speed_grid(
-    fi: object,
-    *,
-    yaw: NDArray[np.float64],
-    hub_height: float,
-    bounds: tuple[float, float],
-    wind_speed: float,
-    resolution: int,
-) -> NDArray[np.float64]:
-    """Wake-resolved hub-height speed magnitude on a regular ``(res, res)`` grid.
-
-    Rows index map ``y`` (ascending), columns map ``x``. FLORIS samples on a
-    wind-aligned (for off-axis wind, rotated) grid, so the scattered speed is
-    interpolated onto the regular map grid; points outside the sampled hull fall
-    back to the ambient free-stream speed.
-    """
-    map_x, map_y = bounds
-    grid_x, grid_y = np.meshgrid(
-        np.linspace(0.0, map_x, resolution), np.linspace(0.0, map_y, resolution)
-    )
-    plane = fi.calculate_horizontal_plane(  # type: ignore[attr-defined]
-        height=hub_height,
-        x_resolution=resolution,
-        y_resolution=resolution,
-        x_bounds=(0.0, map_x),
-        y_bounds=(0.0, map_y),
-        yaw_angles=yaw.reshape(1, 1, -1),
-    )
-    px = np.asarray(plane.df.x1.values, dtype=np.float64)
-    py = np.asarray(plane.df.x2.values, dtype=np.float64)
-    speed = np.hypot(
-        np.asarray(plane.df.u.values, dtype=np.float64),
-        np.asarray(plane.df.v.values, dtype=np.float64),
-    )
-
-    from matplotlib.tri import LinearTriInterpolator, Triangulation
-
-    tri = Triangulation(px, py)
-    interpolated = LinearTriInterpolator(tri, speed)(grid_x, grid_y)
-    return np.asarray(np.ma.filled(interpolated, wind_speed), dtype=np.float64)
 
 
 def _pack_flow(
