@@ -41,9 +41,7 @@ from numpy.typing import NDArray
 from wind_rl.config import Config
 
 if TYPE_CHECKING:
-    from floris.tools import (
-        FlorisInterface as FlorisSimulator,  # type: ignore[import-untyped]
-    )
+    from floris.tools import FlorisInterface as FlorisSimulator
 
     from wind_rl.env.windfarm import DesignableWindFarmEnv
 

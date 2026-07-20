@@ -69,7 +69,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["wfcrl.*", "mfm.*", "torchrl.*", "tensordict.*", "pettingzoo.*", "wandb.*", "hydra.*", "matplotlib.*", "scipy.*", "tqdm.*"]
+module = ["wfcrl.*", "mfm.*", "torchrl.*", "tensordict.*", "pettingzoo.*", "wandb.*", "hydra.*", "matplotlib.*", "scipy.*", "tqdm.*", "floris.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

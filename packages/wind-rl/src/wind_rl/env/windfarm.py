@@ -36,9 +36,7 @@ from wfcrl.rewards import DoNothingReward
 from wind_rl.scenario import ScenarioConfig
 
 if TYPE_CHECKING:
-    from floris.tools import (
-        FlorisInterface as FlorisSimulator,  # type: ignore[import-untyped]
-    )
+    from floris.tools import FlorisInterface as FlorisSimulator
 
 
 class ResetOptions(TypedDict, total=False):
