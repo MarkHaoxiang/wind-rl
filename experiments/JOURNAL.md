@@ -27,6 +27,15 @@ to the run/report. See `experiments/README.md` for the contract.
   +0.158). All three FUNCTIONAL (EV>0, no NaN); no winner crowned — deltas are
   within seed noise and fixed wind under-exercises geometric bias (~12 min). See
   `0003_arch_bench/report.md`.
+- `0003_arch_bench` (decisive: varied wind, 8+16-turbine tiers, 20 iters × 3
+  seeds) — PASS — all archs FUNCTIONAL at both scales, and the proxies split:
+  critic-EV decisively `set_transformer` > `mlp` > `gcn` at both tiers and
+  scale-improving (0.79→0.88 / 0.57→0.75 / 0.18→0.29), but the policy proxy
+  reorders — `gcn` is the only arch with all-positive, low-variance deltas
+  (+0.55±0.32 @8t, +0.58±0.25 @16t) while `mlp`/`set_transformer` straddle zero.
+  Recommend `gcn` (reliability, moderate confidence) now, `set_transformer`
+  (capacity) at longer budgets; `mlp` dominated (~90 min, wandb online). See
+  `0003_arch_bench/report.md`.
 - `0004_ppo_tuning` — PASS — PPO tuning-lever sweep (2x3 factorial over lr x
   max_grad_norm + entropy, `mlp`, 3-turbine, 2 seeds/arm, online). No lever beats
   baseline beyond seed noise: eval-AUC band 33.43–33.60 vs per-arm std 0.3–0.6;

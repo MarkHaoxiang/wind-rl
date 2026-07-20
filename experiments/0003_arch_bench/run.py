@@ -48,6 +48,15 @@ class VariantConfig(Config):
     model: ModelConfig
 
 
+class TierConfig(Config):
+    name: str
+    scenario: ScenarioConfig
+    variants: list[VariantConfig] = Field(min_length=1)
+
+    def model_variants(self) -> list[tuple[str, ModelConfig]]:
+        return [(v.name, v.model) for v in self.variants]
+
+
 class CriticConfig(Config):
     n_rollouts: int = Field(gt=0)
     gamma: float = Field(gt=0, le=1)
@@ -71,27 +80,35 @@ class ExperimentConfig(Config):
     seed: int
     layout_seed: int
     device: str = "cpu"
-    scenario: ScenarioConfig
     critic: CriticConfig
     policy: PolicyConfig
     logging: LoggingConfig = LoggingConfig()
-    variants: list[VariantConfig] = Field(min_length=1)
-
-    def model_variants(self) -> list[tuple[str, ModelConfig]]:
-        return [(v.name, v.model) for v in self.variants]
+    tiers: list[TierConfig] = Field(min_length=1)
 
 
-def _compose(overrides: list[str]) -> DictConfig:
+def _compose(argv: list[str]) -> DictConfig:
+    config_name = "config"
+    overrides: list[str] = []
+    it = iter(argv)
+    for arg in it:
+        if arg == "--config-name":
+            config_name = next(it)
+        elif arg.startswith("--config-name="):
+            config_name = arg.split("=", 1)[1]
+        else:
+            overrides.append(arg)
     conf_dir = str(Path(__file__).parent / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
-        return compose(config_name="config", overrides=overrides)
+        return compose(config_name=config_name, overrides=overrides)
 
 
 def _base_training_config(
-    cfg: ExperimentConfig, layout: NDArray[np.float64]
+    cfg: ExperimentConfig,
+    tier: TierConfig,
+    layout: NDArray[np.float64],
 ) -> TrainingConfig:
     return TrainingConfig(
-        experiment_name=cfg.experiment_name,
+        experiment_name=f"{cfg.experiment_name}_{tier.name}",
         seed=cfg.seed,
         device=cfg.device,
         n_iters=cfg.policy.n_iters,
@@ -100,13 +117,14 @@ def _base_training_config(
         eval_episodes=cfg.policy.eval_episodes,
         checkpoint_interval=cfg.policy.n_iters,
         layout=layout.tolist(),
-        scenario=cfg.scenario,
+        scenario=tier.scenario,
         ppo=cfg.policy.ppo,
         logging=cfg.logging,
     )
 
 
 def _print_table(
+    tier: str,
     critic: list[CriticResult],
     policy: list[PolicyResult],
     seeds: list[int],
@@ -115,71 +133,74 @@ def _print_table(
     policy_by_name = {p.name: p for p in policy}
     names = [c.name for c in critic]
 
-    seed_cols = "".join(f"{f'd(s{s})':>9}" for s in seeds)
     header = (
         f"{'arch':<16}{'critic_EV':>10}{'critic_MSE':>11}"
-        f"{seed_cols}{'d_mean':>9}{'s/iter':>8}{'params':>9}  verdict"
+        f"{'d_mean':>9}{'d_std':>8}{'s/iter':>8}{'params':>9}  verdict"
     )
-    print("\ncomparison")
+    print(f"\ncomparison [{tier}]")
     print(header)
     print("-" * len(header))
     for name in names:
         c = critic_by_name[name]
         p = policy_by_name[name]
-        deltas = {sr.seed: sr.delta for sr in p.seed_results}
-        seed_vals = "".join(f"{deltas[s]:>+9.3f}" for s in seeds)
         functional = c.explained_variance > 0.0 and p.functional
         print(
             f"{name:<16}{c.explained_variance:>+10.4f}{c.val_mse:>11.4f}"
-            f"{seed_vals}{p.mean_delta:>+9.3f}{p.s_per_iter:>8.2f}"
+            f"{p.mean_delta:>+9.3f}{p.std_delta:>8.3f}{p.s_per_iter:>8.2f}"
             f"{c.params:>9}  {'FUNCTIONAL' if functional else 'NON-FUNCTIONAL'}"
         )
+    per_seed = "  ".join(
+        f"{name}: "
+        + ",".join(
+            f"s{sr.seed}{sr.delta:+.3f}" for sr in policy_by_name[name].seed_results
+        )
+        for name in names
+    )
+    print(f"per-seed deltas [{tier}]  {per_seed}")
 
 
 def main() -> int:
     cfg = ExperimentConfig.from_raw(_compose(sys.argv[1:]))
     wdir = WindRlSettings().resolved_wdir / cfg.experiment_name
 
-    layout = sample_feasible_layout(
-        cfg.scenario, np.random.default_rng(cfg.layout_seed)
-    )
-    if not is_feasible(layout, cfg.scenario):  # pragma: no cover - defensive
-        raise RuntimeError("sampled layout is infeasible")
-
-    variants = cfg.model_variants()
-    critic_results = run_critic_proxy(
-        wdir,
-        cfg.scenario,
-        layout,
-        variants,
-        CriticProxyConfig(
-            n_rollouts=cfg.critic.n_rollouts,
-            gamma=cfg.critic.gamma,
-            val_fraction=cfg.critic.val_fraction,
-            n_steps=cfg.critic.n_steps,
-            batch_size=cfg.critic.batch_size,
-            lr=cfg.critic.lr,
-            ev_gate=cfg.critic.ev_gate,
-        ),
-        cfg.seed,
-        cfg.device,
+    critic_cfg = CriticProxyConfig(
+        n_rollouts=cfg.critic.n_rollouts,
+        gamma=cfg.critic.gamma,
+        val_fraction=cfg.critic.val_fraction,
+        n_steps=cfg.critic.n_steps,
+        batch_size=cfg.critic.batch_size,
+        lr=cfg.critic.lr,
+        ev_gate=cfg.critic.ev_gate,
     )
 
-    base = _base_training_config(cfg, layout)
-    policy_results = run_policy_proxy(base, variants, cfg.policy.seeds)
-
-    _print_table(critic_results, policy_results, cfg.policy.seeds)
-
-    critic_by_name = {c.name: c for c in critic_results}
-    policy_by_name = {p.name: p for p in policy_results}
-    non_functional = [
-        name
-        for name, _ in variants
-        if not (
-            critic_by_name[name].explained_variance > cfg.critic.ev_gate
-            and policy_by_name[name].functional
+    non_functional: list[str] = []
+    for tier in cfg.tiers:
+        layout = sample_feasible_layout(
+            tier.scenario, np.random.default_rng(cfg.layout_seed)
         )
-    ]
+        if not is_feasible(layout, tier.scenario):  # pragma: no cover - defensive
+            raise RuntimeError(f"sampled layout for tier {tier.name!r} is infeasible")
+
+        variants = tier.model_variants()
+        critic_results = run_critic_proxy(
+            wdir, tier.scenario, layout, variants, critic_cfg, cfg.seed, cfg.device
+        )
+
+        base = _base_training_config(cfg, tier, layout)
+        policy_results = run_policy_proxy(base, variants, cfg.policy.seeds, tier.name)
+
+        _print_table(tier.name, critic_results, policy_results, cfg.policy.seeds)
+
+        critic_by_name = {c.name: c for c in critic_results}
+        policy_by_name = {p.name: p for p in policy_results}
+        non_functional += [
+            f"{tier.name}/{name}"
+            for name, _ in variants
+            if not (
+                critic_by_name[name].explained_variance > cfg.critic.ev_gate
+                and policy_by_name[name].functional
+            )
+        ]
 
     if non_functional:
         print(f"\nBENCHMARK FAIL: non-functional architectures {non_functional}")

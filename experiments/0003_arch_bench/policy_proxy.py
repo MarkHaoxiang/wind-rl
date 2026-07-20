@@ -11,7 +11,9 @@ completes with all-finite metrics.
 from __future__ import annotations
 
 import math
+import os
 import time
+from statistics import pstdev
 from typing import NamedTuple
 
 from wind_rl.models import ModelConfig
@@ -39,6 +41,10 @@ class PolicyResult(NamedTuple):
         return sum(s.delta for s in self.seed_results) / len(self.seed_results)
 
     @property
+    def std_delta(self) -> float:
+        return pstdev(s.delta for s in self.seed_results)
+
+    @property
     def s_per_iter(self) -> float:
         return sum(s.s_per_iter for s in self.seed_results) / len(self.seed_results)
 
@@ -59,7 +65,7 @@ def _all_finite(history: list[dict[str, float]]) -> bool:
 
 
 def _run_seed(
-    base: TrainingConfig, name: str, model: ModelConfig, seed: int
+    base: TrainingConfig, name: str, model: ModelConfig, seed: int, tier: str
 ) -> SeedResult:
     cfg = base.model_copy(
         update={
@@ -68,6 +74,14 @@ def _run_seed(
             "experiment_name": f"{base.experiment_name}_{name}_s{seed}",
         }
     )
+    # wandb latches WANDB_RUN_GROUP/WANDB_TAGS into its process-global settings
+    # at the first init and ignores later env changes; tear the singleton down
+    # so each seed's group (collecting an arch-tier's seeds) and tags re-read.
+    import wandb
+
+    wandb.teardown()
+    os.environ["WANDB_RUN_GROUP"] = f"{base.experiment_name}_{name}"
+    os.environ["WANDB_TAGS"] = f"{name},{tier},s{seed}"
     history = MappoTrainer(cfg).run()
     evals = [m[_METRIC] for m in history if _METRIC in m]
     first, last = _windowed(evals)
@@ -86,11 +100,12 @@ def run_policy_proxy(
     base: TrainingConfig,
     variants: list[tuple[str, ModelConfig]],
     seeds: list[int],
+    tier: str,
 ) -> list[PolicyResult]:
     results: list[PolicyResult] = []
     for name, model in variants:
         start = time.perf_counter()
-        seed_results = [_run_seed(base, name, model, seed) for seed in seeds]
+        seed_results = [_run_seed(base, name, model, seed, tier) for seed in seeds]
         print(
             f"[policy:{name}] {len(seeds)} seeds in {time.perf_counter() - start:.1f}s"
         )

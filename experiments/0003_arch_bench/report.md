@@ -4,115 +4,121 @@
 
 The three architectures in the `ModelConfig` union — `mlp`, `gcn` (dense-adjacency
 GCN, research v0), `set_transformer` (permutation-equivariant set transformer with
-wind-frame canonicalisation, research v1) — can be ranked *cheaply*, in minutes
-rather than full training runs, by two fast proxy tasks
+wind-frame canonicalisation, research v1) — can be ranked by two fast proxy tasks
 (`docs/research/2026-07-19-geometric-architectures.md` §5): a supervised
 value-regression **critic proxy** and a fixed-budget MAPPO **policy proxy**. Each
-architecture is expected to be **functional** — its critic beats a
-predict-the-mean baseline (`EV > 0`) and its PPO runs complete without NaN. The
-suite is designed to *rank*, not to crown a winner at this scale.
+architecture must be **functional** — its critic beats predict-the-mean (`EV > 0`)
+and every PPO seed completes without NaN. The **decisive** profile additionally
+tests whether, once the regime actually exercises geometric bias (varied wind,
+16 turbines, a real training budget), the ranking separates from seed noise and
+reorders the fixed-wind result.
 
 ## Setup
 
-- **Fixed layout.** One feasible 8-turbine layout, sampled once via
-  `design.geometry.sample_feasible_layout(scenario, rng(layout_seed=0))` and held
-  constant. Map 2000×2000, min spacing 400 m. Wind is **fixed** at 270°/8 m/s, so
-  the only signal in the critic proxy is the yaw trajectory (positions and wind
-  are constant across every sample) — a clean, geometry-light regression that
-  isolates critic fitting capacity.
-- **Device.** Pinned to **CPU**. FLORIS is CPU-bound, so a GPU does not help
-  (measured: the same run is *slower* on CUDA due to host↔device transfer around
-  the CPU env), and CPU is where the `set_transformer` attention vmap-fallback
-  cost is honestly visible.
+Two config profiles share one harness (`run.py`, tier loop over
+`{scenario, variants}`; verdict asserted in code):
 
-**Critic proxy — supervised value regression.** A dataset of per-agent
-observations + empirical discounted returns (Monte-Carlo within episode,
-γ=0.99) is collected from **300 random-policy rollouts** (20 steps × 8 agents →
-6000 timestep samples) and cached under `WIND_RL_WDIR/0003_arch_bench/`. Targets
-are standardized by train statistics, so predict-the-mean is exactly `MSE=1 /
-EV=0`. Each architecture's critic — built through the shared
-`build_actor_critic` union entry — is trained under an **identical budget**
-(Adam, lr 2e-3, 2500 steps, batch 256, 80/20 split) and scored by validation MSE
-and explained variance. `EV > 0` is the functional gate. The budget is sized so
-the slowest-converging critic (the MLP is a slow starter) clears the gate with
-margin; it is *not* tuned to favour any architecture.
+- **`config` (quick, default).** One fixed 8-turbine layout, **fixed** wind
+  270°/8 m/s, 8 PPO iters × 3 seeds. Fast-iteration plumbing check
+  (`WANDB_MODE=disabled`, ~12 min).
+- **`decisive` (`--config-name decisive`).** The upgrade the first run's Decision
+  called for. Two tiers — **8** and **16** turbines — each over all three archs.
+  - **Varied wind.** `fixed_wind_direction` unset ⇒ wfcrl samples a random inflow
+    every episode, so a wind-conditioned, rotation-aware policy must generalise
+    across directions. Return variance exists again, so critic EV is meaningful
+    (vs the fixed-wind regime where the only signal was the yaw trajectory). Eval
+    averages **5** random-wind episodes/iter so the windowed delta tracks learning,
+    not the wind draw.
+  - **Budget.** Policy proxy **20 PPO iters × 3 seeds** {0,1,2} per (arch, tier),
+    identical PPO hyperparameters across archs (clip 0.2, γ 0.99, λ 0.95, Adam
+    3e-4 cosine→1e-4, 8 epochs × 4 minibatches). Critic proxy: 300 random-policy
+    rollouts under varied wind (new cache key), targets standardized by train
+    stats (predict-the-mean ≡ `MSE=1`/`EV=0`), identical optimiser budget across
+    archs (Adam 2e-3, 2500 steps, batch 256, 80/20 split).
+- **Device.** CPU (FLORIS is CPU-bound; a GPU is slower via host↔device transfer,
+  and CPU is where the `set_transformer` attention vmap-fallback would show).
+- **Score.** Critic: validation MSE + explained variance. Policy: windowed
+  deterministic-eval reward delta (mean of last third − first third of evals) per
+  seed, mean ± std across seeds, plus wall-clock/iter. Layouts, checkpoints and the
+  varied-wind dataset cache land under `WIND_RL_WDIR`; policy runs log online to
+  wandb project `wind-rl`, grouped per arch-tier (3 seeds/group), tagged
+  `{arch, tier, sN, decisive}`.
 
-**Policy proxy — fixed-budget MAPPO.** Short identical-budget runs via the shared
-`MappoTrainer`: **8 iterations × 1000 frames**, **3 seeds** {0,1,2}, PPO clip 0.2,
-γ 0.99, λ 0.95, Adam 3e-4 (cosine → 1e-4), 8 epochs × 4 minibatches. Score: the
-windowed deterministic-eval reward delta (mean of the last third of evals minus
-the first third) per seed and averaged, plus wall-clock per iteration. Functional
-iff every seed completes with all-finite metrics.
+**Verdict (asserted in `run.py`).** Every architecture, every tier must be
+functional — critic `EV > 0` **and** every PPO seed finite. Exits nonzero iff any
+cell is non-functional. It does **not** assert a ranking.
 
-**Verdict (asserted in `run.py`).** Every architecture must be functional — critic
-`EV > ev_gate` (0.0) **and** every PPO seed finite. The run exits nonzero iff any
-architecture is non-functional. It does **not** assert a ranking.
+## Results — decisive profile
 
-## Results
+**BENCHMARK PASS** — every architecture is functional at both tiers. Real run,
+CPU, wandb online. Total wall-clock **≈ 90 min** (t8 ≈ 38 min, t16 ≈ 52 min).
 
-**BENCHMARK PASS** — every architecture is functional. Real run, CPU, seed 0,
-`WANDB_MODE=disabled`. Total wall-clock **≈ 12 min** (critic proxy ≈ 90 s incl.
-dataset generation; policy proxy 3 × ~200 s), well under the ~40 min budget.
+**8 turbines, varied wind**
 
-| arch              | critic EV | critic MSE | Δ(s0)  | Δ(s1)  | Δ(s2)  | Δ mean  | s/iter | params  | verdict    |
-| ----------------- | --------: | ---------: | -----: | -----: | -----: | ------: | -----: | ------: | ---------- |
-| `mlp`             |  +0.5920  |    0.4108  | +0.356 | −0.423 | −0.107 | −0.058  |  8.29  |  11 459 | FUNCTIONAL |
-| `gcn`             |  +0.1852  |    0.8047  | +0.106 | −0.238 | −0.372 | −0.168  |  8.31  |   9 219 | FUNCTIONAL |
-| `set_transformer` |  +0.6854  |    0.3162  | +0.115 | +0.018 | +0.342 | +0.158  |  8.72  | 135 043 | FUNCTIONAL |
+| arch              | critic EV | critic MSE | Δ mean ± std | per-seed Δ (s0/s1/s2)    | s/iter | params  |
+| ----------------- | --------: | ---------: | -----------: | ----------------------- | -----: | ------: |
+| `mlp`             |  +0.5713  |    0.4282  | +0.174 ±0.99 | +1.566 / −0.479 / −0.566 |  11.61 |  11 459 |
+| `gcn`             |  +0.1784  |    0.8092  | +0.554 ±0.32 | +0.218 / +0.461 / +0.983 |  11.31 |   9 219 |
+| `set_transformer` |  +0.7854  |    0.2123  | +0.443 ±0.89 | −0.325 / +1.694 / −0.039 |  11.73 | 135 043 |
 
-- **Critic proxy (the discriminating signal).** `set_transformer` (EV 0.685) and
-  `mlp` (EV 0.592) both fit the value function well; `gcn` (EV 0.185) captures far
-  less variance. The GCN's constraints — KNN dense adjacency, `tanh`
-  message-passing, and a *single* mean-pooled scalar value broadcast to all agents
-  — bottleneck its capacity on this per-agent-yaw regression, whereas the MLP's
-  centralized critic and the transformer's per-token pooling retain more of the
-  signal.
-- **Policy proxy.** At an 8-iteration budget the windowed deltas are small and
-  seed-dependent (both signs), on a reward scale of ~52–58. `set_transformer` is
-  the only architecture with a positive mean delta (+0.158) *and* consistent sign
-  behaviour across seeds; `mlp` and `gcn` straddle zero. This is a learning-signal
-  probe, not convergence — the functional gate (no NaN, run completes) is what all
-  three clear.
-- **Wall-clock / vmap-fallback.** Per-iteration cost is dominated by FLORIS env
-  collection (~8 s), so all three land within ~5% of each other. The
-  `set_transformer`'s known CPU SDPA vmap-fallback (`nn.MultiheadAttention`'s math
-  path, taken because the fused path lacks a vmap batching rule under GAE/PPO) is
-  real — measured ~4× in the *update* step alone (≈0.24 s vs ≈0.06 s) — but swamped
-  by env time here, showing up only as the +0.4 s/iter gap.
-- **Params.** `set_transformer` (135 k) is >10× the `mlp` (11.5 k) and `gcn`
-  (9.2 k).
+**16 turbines, varied wind**
+
+| arch              | critic EV | critic MSE | Δ mean ± std | per-seed Δ (s0/s1/s2)    | s/iter | params  |
+| ----------------- | --------: | ---------: | -----------: | ----------------------- | -----: | ------: |
+| `mlp`             |  +0.7482  |    0.2526  | +0.345 ±0.98 | −1.008 / +1.293 / +0.750 |  18.72 |  14 019 |
+| `gcn`             |  +0.2855  |    0.7001  | +0.581 ±0.25 | +0.329 / +0.494 / +0.919 |  16.51 |   9 219 |
+| `set_transformer` |  +0.8800  |    0.1196  | −0.228 ±0.66 | −0.015 / −1.114 / +0.446 |  17.13 | 135 043 |
+
+- **Critic proxy — decisive and stable.** Ordering is `set_transformer` >
+  `mlp` > `gcn` at **both** scales, and every architecture *improves* with more
+  turbines (more inflow geometry to fit): `set_transformer` 0.785→0.880, `mlp`
+  0.571→0.748, `gcn` 0.178→0.286. `set_transformer` fits the varied-wind value
+  function best by a clear margin; `gcn`'s single mean-pooled scalar value
+  bottlenecks it.
+- **Policy proxy — one architecture separates from noise: `gcn`.** It is the only
+  architecture with **all six** seed deltas positive, the tightest variance
+  (std 0.32 / 0.25 vs 0.66–0.99 for the others), and the highest mean at **both**
+  tiers (+0.554, +0.581). `mlp` and `set_transformer` straddle zero (deltas flip
+  sign across seeds, std ~0.7–1.0); `set_transformer`'s 16t mean is negative but
+  within its own noise band. This is a **reorder** of the fixed-wind run, where
+  `gcn` was the clear third — varied wind rewards its locality bias, exactly the
+  lever the first Decision predicted might move `gcn` vs `mlp`.
+- **Cost / Pareto.** Env-dominated: at 16t all three land within ~2 s/iter, and
+  `gcn` is *cheapest* (16.51 s) — the `set_transformer` vmap-fallback tax stays
+  invisible behind FLORIS. `gcn`/`set_transformer` are parameter-count invariant
+  in `N` (9 219 / 135 043 at both tiers, permutation-equivariant); `mlp`'s
+  centralized critic grows with `N` (11 459→14 019).
 
 ## Decision
 
-The suite is settled as a **framework**: two fast proxies, identical budgets, a
-scripted functional gate, and one comparison table — extended by appending a
-`variant`. All three architectures PASS.
+The critic proxy and the policy proxy point in **different directions**, and that
+split is the finding:
 
-**What the numbers suggest re promotion.** On the cleaner of the two signals (the
-critic proxy) `set_transformer` leads (EV 0.685), edging the strong-and-cheap
-`mlp` baseline (0.592), with `gcn` a clear third (0.185); `set_transformer` is
-also the only architecture with a positive mean policy delta. Taken at face value
-this points toward **`set_transformer`** for promotion, with **`mlp`** as the
-value-for-compute floor (most of the EV story at <1/10 the parameters and no
-vmap-fallback tax) and **`gcn`** the weakest fit. But this is a *suggestion, not a
-verdict* — deliberately, per the suite's design.
+- **Value-fitting capacity → `set_transformer`, decisively.** Best critic EV at
+  both scales (0.785, 0.880) and the only architecture whose lead *widens* with
+  turbines. But this capacity does **not** convert to policy gains at a 20-iter
+  budget — its policy delta straddles zero at 8t and is negative-in-noise at 16t.
+- **Reliable policy improvement → `gcn`, decisively.** The only architecture with
+  uniformly positive, low-variance deltas across all six (tier × seed) cells, best
+  mean at both scales, lowest params, cheapest 16t wall-clock. Its weak critic is
+  a genuine caveat — a poor value function should hurt PPO — but its strong
+  locality prior evidently regularises the policy into consistent, if modest, gains.
+- **`mlp` is dominated** on the Pareto front: a middle critic that must grow with
+  `N`, and the highest-variance policy (straddles zero at both scales).
 
-**Why it is not decisive, and what a decisive comparison needs.**
-1. **Policy deltas are within seed noise.** 8 iterations is far too short; the
-   signed deltas flip across seeds. A decisive policy comparison needs
-   substantially more iterations and more seeds to separate learning from rollout
-   variance.
-2. **The regime under-exercises geometric bias.** Fixed wind + fixed layout means
-   the transformer's permutation-equivariance / canonicalisation and the GCN's
-   locality do little work — exactly the levers those architectures exist for.
-   Scaling to more turbines and to *varied* wind (where a wind-conditioned,
-   rotation-aware policy must generalise across inflow directions) is where a real
-   ranking would emerge, and could plausibly reorder `gcn` vs `mlp`.
-3. **Cost is not yet on the scale.** The vmap-fallback tax is invisible behind
-   FLORIS here; on a cheaper/faster env or GPU-resident rollout it would matter,
-   and the quality-vs-wall-clock Pareto (not quality alone) is the promotion
-   criterion the research doc mandates.
+**Promotion recommendation (confidence: MODERATE).** For the main MAPPO policy
+pipeline at the current operating point (8–16 turbines, varied wind, short
+budget), promote **`gcn`** as the *reliability* pick — it is the one architecture
+whose policy improvement is already separated from seed noise, at the lowest cost.
+Carry **`set_transformer`** as the *capacity* front-runner to revisit at a longer
+training budget, where its decisive, scale-improving critic-EV lead has room to
+translate into policy gains and its short-budget policy regression can be retested.
+Deprioritise **`mlp`**.
 
-So: promote nothing on this run. The table is the deliverable; `set_transformer`
-is the front-runner to *carry into* a larger-budget, more-turbines, varied-wind
-comparison, with `mlp` as the baseline it must beat on the Pareto front.
+Confidence is moderate, not high, because only the `gcn` policy signal has cleared
+seed noise; `mlp` vs `set_transformer` on the policy proxy remains inconclusive
+(deltas within their own std). What would settle `gcn` vs `set_transformer`
+definitively: run both to **convergence** (not a 20-iter probe) at 8 and 16
+turbines under varied wind — the critic proxy says `set_transformer` has the higher
+ceiling, so the open question is purely whether more optimisation lets its policy
+realise it before `gcn`'s reliable-but-modest curve plateaus.

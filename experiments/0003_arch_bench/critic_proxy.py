@@ -8,6 +8,7 @@ variance against a predict-the-mean baseline. ``EV > 0`` is the functional gate.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
@@ -76,7 +77,7 @@ class CriticProxyConfig(NamedTuple):
 
 
 def run_critic_proxy(
-    wdir_root: object,
+    wdir_root: Path,
     scenario: ScenarioConfig,
     layout: NDArray[np.float64],
     variants: list[tuple[str, ModelConfig]],
@@ -84,11 +85,8 @@ def run_critic_proxy(
     seed: int,
     device: str,
 ) -> list[CriticResult]:
-    from pathlib import Path
-
-    wdir = Path(str(wdir_root))
     data = generate_or_load(
-        wdir, scenario, layout, cfg.n_rollouts, cfg.gamma, seed, device
+        wdir_root, scenario, layout, cfg.n_rollouts, cfg.gamma, seed, device
     )
     train, val = split_standardized(data, cfg.val_fraction, seed)
 
