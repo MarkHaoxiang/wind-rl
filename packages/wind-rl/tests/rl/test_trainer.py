@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 
 import numpy as np
@@ -7,11 +8,12 @@ import pytest
 import torch
 from numpy.typing import NDArray
 from pydantic import ValidationError
-from torchrl.envs.utils import ExplorationType, set_exploration_type
+from torchrl.envs import ParallelEnv
+from torchrl.envs.utils import ExplorationType, check_env_specs, set_exploration_type
 
 pytest.importorskip("wfcrl")
 
-from wind_rl.design import RandomDesignerConfig
+from wind_rl.design import RandomDesigner, RandomDesignerConfig, create_layout_buffer
 from wind_rl.env.factory import make_env
 from wind_rl.models import build_actor_critic
 from wind_rl.models.mlp import MlpModelConfig
@@ -179,3 +181,45 @@ def test_random_designer_drives_train_env_layouts() -> None:
     assert len(history) == cfg.n_iters
     assert len(produced) >= 2, "designer reset policy was not invoked per episode"
     assert any(not np.allclose(produced[0], layout) for layout in produced[1:])
+
+
+def test_parallel_env_batches_distinct_designer_layouts(tmp_path: Path) -> None:
+    scenario = _config().scenario
+    producer, consumer = create_layout_buffer(tmp_path / "buf")
+    producer.push(RandomDesigner(scenario, seed=0).generate_layout_batch(8))
+
+    worker = functools.partial(
+        make_env, "train", scenario, layout_consumer=consumer, device="cpu"
+    )
+    penv = ParallelEnv(2, worker, mp_start_method="fork", device="cpu")
+    try:
+        check_env_specs(penv)
+
+        td = penv.reset()
+        layouts = td["state", "layout"]
+        assert layouts.shape == (2, scenario.n_turbines, 2)
+        # Each worker popped a different buffer layout, so the farms differ.
+        assert not torch.allclose(layouts[0], layouts[1])
+
+        rollout = penv.rollout(3)
+        assert rollout.shape[0] == 2
+        assert rollout["next", GROUP_NAME, "reward"].shape[0] == 2
+    finally:
+        penv.close()
+
+
+def test_parallel_collection_completes_and_frames_match() -> None:
+    cfg = _config().model_copy(
+        update={"experiment_name": "test_parallel", "n_iters": 1, "n_envs": 2}
+    )
+    trainer = MappoTrainer(cfg)
+
+    history = trainer.run()
+
+    assert trainer._resolve_n_envs() == 2
+    assert len(history) == 1
+    # A LazyTensorStorage sized to frames_per_batch would overflow on extend if
+    # the two-worker collector returned the wrong frame count.
+    assert history[0]["train/total_frames"] == float(cfg.frames_per_batch)
+    assert history[0]["train/episodes"] > 0.0
+    assert history[0]["optim/grad_norm"] > 0.0

@@ -24,6 +24,7 @@ from pettingzoo.utils.conversions import aec_to_parallel
 from tensordict.nn import TensorDictModule
 from torchrl.envs import Compose, RemoveEmptySpecs, RewardSum, TransformedEnv
 
+from wind_rl.design.buffer import LayoutConsumer
 from wind_rl.design.geometry import is_feasible
 from wind_rl.env.transforms import RewardNormalisation
 from wind_rl.env.windfarm import build_designable_windfarm
@@ -59,6 +60,7 @@ def make_env(
     scenario: ScenarioConfig,
     layout: NDArray[np.float64] | None = None,
     reset_policy: TensorDictModule | None = None,
+    layout_consumer: LayoutConsumer | None = None,
     simulator: Literal["floris"] = "floris",
     device: str | None = None,
 ) -> TransformedEnv:
@@ -72,6 +74,13 @@ def make_env(
     layout:
         ``(N, 2)`` initial turbine coordinates. Defaults to
         :func:`default_layout`.
+    reset_policy:
+        Live designer module driving per-episode layouts in single-env mode;
+        cannot cross a process boundary, so parallel workers use
+        ``layout_consumer`` instead.
+    layout_consumer:
+        Shared cross-process layout buffer that a parallel worker pops one
+        layout from at each reset (the designer path for ``ParallelEnv``).
     simulator:
         Only ``"floris"`` is implemented.
     """
@@ -101,6 +110,7 @@ def make_env(
     wrapped = WfcrlCoDesignWrapper(
         env=parallel_env,
         reset_policy=reset_policy,
+        layout_consumer=layout_consumer,
         device=device,
     )
     if scenario.fixed_wind_direction is not None:

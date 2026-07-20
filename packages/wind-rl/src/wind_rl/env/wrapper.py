@@ -4,10 +4,11 @@
 PettingZoo *parallel* env) to torchrl 0.11's :class:`PettingZooWrapper`, and adds
 the co-design plumbing:
 
-* a **layout override** — either a stored ``(N, 2)`` tensor set via
-  :meth:`set_layout_override`, or an optional ``reset_policy`` module that
-  samples one — is forwarded to the underlying env as ``reset`` options so the
-  MDP is rebuilt around it;
+* a **layout override** — a stored ``(N, 2)`` tensor set via
+  :meth:`set_layout_override`, a ``layout_consumer`` popped from the shared
+  cross-process layout buffer (the parallel-collection designer path), or an
+  optional ``reset_policy`` module that samples one — is forwarded to the
+  underlying env as ``reset`` options so the MDP is rebuilt around it;
 * the global ``state()`` (including the turbine ``"layout"``) is injected into the
   output tensordict on both reset and step.
 
@@ -20,7 +21,8 @@ use a **stored attribute** (:meth:`set_layout_override`) as the reliable channel
 a ``"layout_override"`` field in the reset tensordict is still honoured when the
 wrapper is driven directly (e.g. in tests), but the stored attribute takes
 priority. Precedence on reset: stored override -> tensordict field ->
-``reset_policy`` -> no rebuild (keep current layout).
+``layout_consumer`` (buffer pop) -> ``reset_policy`` -> no rebuild (keep current
+layout).
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from torchrl.envs import PettingZooWrapper
 from torchrl.envs.libs.gym import _gym_to_torchrl_spec_transform, set_gym_backend
 
 from wind_rl.design.base import LAYOUT_WEIGHTS_KEY
+from wind_rl.design.buffer import LayoutConsumer
 from wind_rl.env.windfarm import ResetOptions
 
 
@@ -45,6 +48,7 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         env: object | None = None,
         *,
         reset_policy: TensorDictModule | None = None,
+        layout_consumer: LayoutConsumer | None = None,
         categorical_actions: bool = False,
         **kwargs: object,
     ) -> None:
@@ -54,6 +58,7 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         # delegates to the wrapped env instead of resolving ``_modules`` -- a
         # registered submodule would then be unreachable at reset time.
         object.__setattr__(self, "_reset_policy", reset_policy)
+        self._layout_consumer = layout_consumer
         self._layout_override: torch.Tensor | None = None
         self._wind_override: tuple[float, float] | None = None
         # ``return_state=False``: torchrl's base ``_reset``/``_step`` would call
@@ -110,6 +115,10 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         if tensordict is not None and "layout_override" in tensordict.keys():  # noqa: SIM118
             layout = tensordict.get("layout_override")
             return np.asarray(layout.numpy(force=True))
+        if self._layout_consumer is not None:
+            popped = self._layout_consumer.pop()
+            if popped is not None:
+                return popped.astype(np.float32)
         if self._reset_policy is not None:
             source = tensordict if tensordict is not None else TensorDict({}, [])
             out = self._reset_policy(source.to(self.device))

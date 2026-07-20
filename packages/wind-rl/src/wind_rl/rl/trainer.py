@@ -7,7 +7,9 @@ consumer (the FLORIS MLP smoke experiment), so this is one small class over
 
 from __future__ import annotations
 
+import functools
 import math
+import shutil
 import time
 from pathlib import Path
 from typing import NamedTuple
@@ -20,11 +22,18 @@ from tensordict import TensorDictBase
 from torch.nn.utils import clip_grad_norm_
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, ReplayBuffer, SamplerWithoutReplacement
-from torchrl.envs import TransformedEnv
+from torchrl.envs import EnvBase, ParallelEnv, SerialEnv, TransformedEnv
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 
 from wind_rl.config import Config
-from wind_rl.design import Designer, DesignerConfig, create_designer
+from wind_rl.design import (
+    Designer,
+    DesignerConfig,
+    LayoutProducer,
+    create_designer,
+    create_layout_buffer,
+    run_buffer_dir,
+)
 from wind_rl.env.factory import make_env
 from wind_rl.env.render import render_farm
 from wind_rl.experiment.settings import WindRlSettings
@@ -44,6 +53,8 @@ _STATE_VALUE_KEY = (GROUP_NAME, "state_value")
 _SCALE_KEY = (GROUP_NAME, "scale")
 _ACTION_KEY = (GROUP_NAME, "action", "yaw")
 _GAUSSIAN_ENTROPY_CONST = 0.5 * math.log(2.0 * math.pi * math.e)
+#: Upper bound on auto-resolved parallel env workers (DiCoDe's ParallelEnv cap).
+_AUTO_ENV_CAP = 20
 
 
 class LoggingConfig(Config):
@@ -59,6 +70,15 @@ class TrainingConfig(Config):
     device: str | None = None
     n_iters: int = 5
     frames_per_batch: int = 400
+    #: Parallel FLORIS collection workers. ``1`` (default) keeps the original
+    #: serial single-env path exactly. ``None`` auto-resolves to the largest
+    #: divisor of ``frames_per_batch`` that is ``<= min(frames_per_batch //
+    #: scenario.max_steps, _AUTO_ENV_CAP)``. An explicit ``>1`` must divide
+    #: ``frames_per_batch``.
+    n_envs: int | None = 1
+    #: Debug fallback: build the batched env as an in-process ``SerialEnv``
+    #: instead of a subprocess ``ParallelEnv`` (no fork; easier to trace).
+    serial_envs: bool = False
     eval_interval: int = 1
     eval_episodes: int = 4
     checkpoint_interval: int = 1
@@ -76,6 +96,18 @@ class TrainingConfig(Config):
                 "set at most one of `layout` (fixed) or `designer` "
                 "(per-episode); a fixed layout is the fixed designer's equivalent"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _n_envs_divides_batch(self) -> TrainingConfig:
+        if self.n_envs is not None:
+            if self.n_envs < 1:
+                raise ValueError("n_envs must be >= 1 (or None for auto)")
+            if self.frames_per_batch % self.n_envs != 0:
+                raise ValueError(
+                    f"frames_per_batch ({self.frames_per_batch}) must be divisible "
+                    f"by n_envs ({self.n_envs}) so batches stay exactly sized"
+                )
         return self
 
 
@@ -160,6 +192,45 @@ class MappoTrainer:
             device=str(self.device),
         )
 
+    def _resolve_n_envs(self) -> int:
+        cfg = self.cfg
+        if cfg.n_envs is not None:
+            return cfg.n_envs
+        target = min(cfg.frames_per_batch // cfg.scenario.max_steps, _AUTO_ENV_CAP)
+        # Largest divisor of frames_per_batch <= target keeps batches exact.
+        return next(
+            d for d in range(max(1, target), 0, -1) if cfg.frames_per_batch % d == 0
+        )
+
+    def _build_train_env(self, n_envs: int, consumer: object | None) -> EnvBase:
+        if n_envs == 1:
+            return self._make_env("train")
+        # reset_policy (a live TensorDictModule) cannot cross a process boundary,
+        # so the designer path in parallel mode flows through ``consumer``.
+        worker = functools.partial(
+            make_env,
+            "train",
+            self.cfg.scenario,
+            layout=_layout_array(self.cfg),
+            layout_consumer=consumer,  # type: ignore[arg-type]
+            device=str(self.device),
+        )
+        env: EnvBase = (
+            SerialEnv(n_envs, worker, device=self.device)
+            if self.cfg.serial_envs
+            else ParallelEnv(n_envs, worker, mp_start_method="fork", device=self.device)
+        )
+        # Distinct per-worker seeds derived from the run seed (worker i -> seed+i).
+        env.set_seed(self.cfg.seed)
+        return env
+
+    def _layouts_per_iter(self, n_envs: int) -> int:
+        # One layout per reset: ~frames_per_batch/max_steps episodes per iter,
+        # plus an ``n_envs`` margin for reset-boundary jitter. A momentary
+        # shortfall degrades gracefully (worker keeps its current layout).
+        cfg = self.cfg
+        return cfg.frames_per_batch // cfg.scenario.max_steps + n_envs
+
     def _eval(self, policy: torch.nn.Module, record_replay: bool) -> _EvalResult:
         env = self._make_env("eval")
         max_steps = self.cfg.scenario.max_steps
@@ -217,8 +288,23 @@ class MappoTrainer:
         )
         optimiser, scheduler = build_optimiser(loss_module, cfg.ppo, cfg.n_iters)
 
+        n_envs = self._resolve_n_envs()
+        designer = self.designer
+        # Single-env mode drives the designer as a live reset_policy inside the
+        # env; parallel workers cannot receive that module, so their designer
+        # layouts flow through the shared on-disk buffer instead.
+        producer: LayoutProducer | None = None
+        buffer_dir: Path | None = None
+        consumer: object | None = None
+        if designer is not None and n_envs > 1:
+            buffer_dir = run_buffer_dir(cfg.experiment_name, self.settings)
+            producer, consumer = create_layout_buffer(buffer_dir)
+            producer.push(
+                designer.generate_layout_batch(self._layouts_per_iter(n_envs))
+            )
+
         collector = SyncDataCollector(
-            self._make_env("train"),
+            self._build_train_env(n_envs, consumer),
             policy,
             frames_per_batch=cfg.frames_per_batch,
             total_frames=cfg.frames_per_batch * cfg.n_iters,
@@ -288,14 +374,19 @@ class MappoTrainer:
                 }
                 metrics.update(_rollout_metrics(data))
                 metrics.update({k: float(np.mean(v)) for k, v in diagnostics.items()})
-                if self.designer is not None:
-                    self.designer.update(data)
+                if designer is not None:
+                    designer.update(data)
                     metrics.update(
-                        {
-                            f"designer/{k}": v
-                            for k, v in self.designer.get_logs().items()
-                        }
+                        {f"designer/{k}": v for k, v in designer.get_logs().items()}
                     )
+                    # Refill the buffer for the workers' next iteration; a live
+                    # reset_policy (single-env) needs no push.
+                    if producer is not None:
+                        producer.push(
+                            designer.generate_layout_batch(
+                                self._layouts_per_iter(n_envs)
+                            )
+                        )
 
                 images: dict[str, NDArray[np.uint8]] = {}
                 html: dict[str, str] = {}
@@ -335,6 +426,8 @@ class MappoTrainer:
         finally:
             collector.shutdown()
             ref_env.close()
+            if buffer_dir is not None:
+                shutil.rmtree(buffer_dir, ignore_errors=True)
             logger.finish()
 
         return history
