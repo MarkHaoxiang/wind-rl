@@ -1,117 +1,97 @@
-"""0001_fixed_layout_marl: fixed-layout MARL benchmark.
+"""0001_fixed_layout_marl: the fixed-layout MARL benchmark framework.
 
-Trains a set of MARL agent architectures (``mlp``, ``gcn``, ...) under an
-identical PPO budget on the SAME fixed wind-farm layout, then reports a
-per-variant learning verdict and a cross-variant comparison table.
+Trains a list of config variants under an IDENTICAL PPO budget on the same fixed
+layout(s), then reports a per-variant verdict and a cross-variant comparison
+table. One framework, three config entry points (pick with ``config=<name>``):
 
-Verdict (asserted in code, PER variant): training completes and the mean of the
-last third of the variant's deterministic evals -- total farm power under wake
-steering -- strictly exceeds the mean of its first third (its OWN baseline).
-Wind is fixed for every reset (direction 270, speed 8), so eval is
-deterministic; the windowed comparison smooths training stochasticity (rollout
-sampling, SGD). Each variant PASSes or FAILs independently. The benchmark does
-NOT crown a winner at smoke scale -- that comparison needs a larger budget.
-Exits nonzero iff any variant FAILs its own baseline.
+  * ``config``      -- architecture benchmark (mlp/gcn/... on the 3-turbine row).
+  * ``ppo_sweep``   -- PPO tuning levers as variants (lr x max_grad_norm + entropy).
+  * ``real_farms``  -- named wfcrl farms (Ormonde/HornsRev1) x architectures, with
+                       the real coordinate frame translated in-map by the library.
+
+The sweep loop, metric harvest, wandb grouping, table, and gates all live in
+``wind_rl.experiment`` (sweep/table/verdict); this script only composes config and
+selects the verdict gate. ``gate=improves`` asserts each variant beats its own
+first-window baseline (learning); ``gate=finite`` asserts each run completes with
+finite metrics (capability at scale). Exits nonzero iff any variant FAILs.
 """
 
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal
 
 from pydantic import Field
 
 from wind_rl.config import Config
 from wind_rl.experiment.cli import compose_experiment
+from wind_rl.experiment.sweep import Variant, run_sweep
+from wind_rl.experiment.table import format_table, summarize
+from wind_rl.experiment.verdict import Gate, improves, is_finite
 from wind_rl.models import ModelConfig
-from wind_rl.rl.trainer import MappoTrainer, TrainingConfig
+from wind_rl.rl.mappo import PPOConfig
+from wind_rl.rl.trainer import TrainingConfig
+from wind_rl.scenario import RealFarmConfig, resolve_real_farm
 
-_METRIC = "eval/episode_reward_mean"
+_GATES: dict[str, Gate] = {"improves": improves(), "finite": is_finite()}
 
 
-class VariantConfig(Config):
+class VariantSpec(Config):
     name: str
-    model: ModelConfig
+    model: ModelConfig | None = None
+    ppo: PPOConfig | None = None
+
+    def to_variant(self) -> Variant:
+        overrides: dict[str, object] = {}
+        if self.model is not None:
+            overrides["model"] = self.model
+        if self.ppo is not None:
+            overrides["ppo"] = self.ppo
+        return Variant(name=self.name, overrides=overrides)
 
 
 class ExperimentConfig(Config):
     base: TrainingConfig
-    variants: list[VariantConfig] = Field(min_length=1)
+    seeds: list[int] = Field(default=[0], min_length=1)
+    gate: Literal["improves", "finite"] = "improves"
+    #: When set, replaces base's scenario+layout with a translated real wfcrl farm.
+    farm: RealFarmConfig | None = None
+    variants: list[VariantSpec] = Field(min_length=1)
 
-    def training_configs(self) -> list[tuple[str, TrainingConfig]]:
-        return [
-            (
-                variant.name,
-                self.base.model_copy(
-                    update={
-                        "model": variant.model,
-                        "experiment_name": f"{self.base.experiment_name}_{variant.name}",
-                    }
-                ),
-            )
-            for variant in self.variants
-        ]
-
-
-class VariantResult(NamedTuple):
-    name: str
-    first: float
-    last: float
-    delta: float
-    seconds: float
-    passed: bool
-
-
-def _verdict(history: list[dict[str, float]]) -> tuple[bool, float, float]:
-    evals = [m[_METRIC] for m in history if _METRIC in m]
-    window = max(1, len(evals) // 3)
-    first = sum(evals[:window]) / window
-    last = sum(evals[-window:]) / window
-    return last > first, first, last
-
-
-def _run_variant(name: str, cfg: TrainingConfig) -> VariantResult:
-    start = time.perf_counter()
-    history = MappoTrainer(cfg).run()
-    seconds = time.perf_counter() - start
-    passed, first, last = _verdict(history)
-    evals = [m[_METRIC] for m in history if _METRIC in m]
-    trajectory = " ".join(f"{v:.2f}" for v in evals)
-    print(f"[{name}] {_METRIC} trajectory: {trajectory}")
-    print(
-        f"[{name}] first-window {first:.4f} -> last-window {last:.4f} "
-        f"(delta {last - first:+.4f}) in {seconds:.1f}s "
-        f"-> {'PASS' if passed else 'FAIL'}"
-    )
-    return VariantResult(name, first, last, last - first, seconds, passed)
-
-
-def _print_table(results: list[VariantResult]) -> None:
-    header = (
-        f"{'variant':<10} {'first_win':>10} {'last_win':>10} "
-        f"{'delta':>9} {'wall_s':>8}  verdict"
-    )
-    print("\ncomparison")
-    print(header)
-    print("-" * len(header))
-    for r in results:
-        print(
-            f"{r.name:<10} {r.first:>10.4f} {r.last:>10.4f} "
-            f"{r.delta:>+9.4f} {r.seconds:>8.1f}  {'PASS' if r.passed else 'FAIL'}"
+    def resolved_base(self) -> TrainingConfig:
+        if self.farm is None:
+            return self.base
+        scenario, layout = resolve_real_farm(self.farm, self.base.scenario)
+        return self.base.model_copy(
+            update={"scenario": scenario, "layout": layout.tolist()}
         )
 
 
+def _parse_args(argv: list[str]) -> tuple[str, list[str]]:
+    config_name, overrides = "config", []
+    for arg in argv:
+        if arg.startswith("config="):
+            config_name = arg.split("=", 1)[1]
+        else:
+            overrides.append(arg)
+    return config_name, overrides
+
+
 def main() -> int:
+    config_name, overrides = _parse_args(sys.argv[1:])
     cfg = compose_experiment(
-        Path(__file__).parent / "conf", ExperimentConfig, sys.argv[1:]
+        Path(__file__).parent / "conf", ExperimentConfig, overrides, config_name
     )
-    results = [_run_variant(name, tc) for name, tc in cfg.training_configs()]
-    _print_table(results)
-    all_pass = all(r.passed for r in results)
-    print("\nBENCHMARK PASS" if all_pass else "\nBENCHMARK FAIL")
-    return 0 if all_pass else 1
+    result = run_sweep(
+        cfg.resolved_base(), [v.to_variant() for v in cfg.variants], cfg.seeds
+    )
+    summaries = summarize(result, _GATES[cfg.gate])
+    print(f"\ncomparison (gate={cfg.gate})")
+    print(format_table(summaries))
+    passed = all(s.passed for s in summaries)
+    print("\nBENCHMARK PASS" if passed else "\nBENCHMARK FAIL")
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

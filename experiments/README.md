@@ -4,6 +4,19 @@ Each numbered directory `NNNN_slug/` is an experiment **framework** — a class
 of related runs sharing machinery, not a single run. Prefer adding a variant
 to an existing framework over scaffolding a new number.
 
+**A new study is a new `conf/` variant set in an existing framework, not a new
+directory — unless the experiment SHAPE is genuinely new.** Surviving frameworks:
+
+- **`0001_fixed_layout_marl`** — the unified fixed-layout MARL benchmark: run
+  `MappoTrainer` over a list of config variants on a fixed layout, tabulate, and
+  gate each variant. Three config entry points (`config` arch benchmark,
+  `config=ppo_sweep` PPO levers, `config=real_farms` named wfcrl farms) share one
+  library loop (`wind_rl.experiment.sweep`/`table`/`verdict`). PPO tuning (was
+  0004) and real-farm training (was 0005) are variant sets here, not their own dirs.
+- **`0002_flowmap_prior`** — flow-map prior (mfm consistency loss); parked.
+- **`0003_arch_bench`** — architecture proxy suite (fast critic/policy proxies that
+  rank architectures without full training).
+
 ## Layout
 
 ```

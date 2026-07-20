@@ -1,11 +1,13 @@
-# 0001_fixed_layout_marl -- fixed-layout MARL benchmark.
+# 0001_fixed_layout_marl / config -- default architecture benchmark.
 #
 # Trains each agent variant under an IDENTICAL PPO budget on the SAME fixed
-# layout(s), then compares learning. `base` holds everything shared (scenario,
-# layout, PPO, budget); `variants` lists the agent architectures to benchmark.
-# Add a variant by appending an entry with its typed `model` config -- `kind`
-# discriminates the model union (mlp / gcn / future kinds), so the list is the
-# only thing that grows.
+# 3-turbine layout, then gates each on learning (gate=improves, the default: a
+# variant PASSes iff the mean of its last-third evals beats its first third).
+# `base` holds everything shared (scenario, layout, PPO, budget); `variants` lists
+# the architectures. Add a variant by appending an entry with its typed `model`
+# config -- `kind` discriminates the model union (mlp / gcn / set_transformer /
+# future kinds), so the list is the only thing that grows. Sibling entry points
+# `config=ppo_sweep` and `config=real_farms` reuse this same run.py + library.
 
 base:
   experiment_name: 0001_fixed_layout_marl
@@ -67,4 +69,12 @@ variants:
       kind: gcn
       hidden_dim: 64
       num_layers: 2
+      initial_std: 0.3
+  - name: set_transformer
+    model:
+      kind: set_transformer
+      embed_dim: 64
+      num_heads: 4
+      num_layers: 2
+      canonicalize_wind: true
       initial_std: 0.3

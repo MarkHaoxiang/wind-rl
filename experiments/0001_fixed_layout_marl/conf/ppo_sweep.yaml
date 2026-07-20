@@ -1,0 +1,147 @@
+# 0001_fixed_layout_marl / ppo_sweep -- PPO tuning levers as config variants.
+#
+# 0001's rich-telemetry runs showed PPO stable but conservative on the fixed
+# 3-turbine row (pre-clip grad norm ~8x above max_grad_norm=1.0, clip saturating
+# every step). This entry sweeps whether loosening the grad clip and/or raising
+# LR speeds convergence, plus one entropy arm -- a hypothesis-driven 2x3 factorial
+# (lr x max_grad_norm) + entropy over 2 seeds. Each arm overrides only `ppo` (a
+# FULL block, since PPOConfig's own defaults differ from this baseline). The gate
+# is `finite`: under a fixed budget every arm saturates to the same optimum, so
+# the verdict is capability (all runs finite) and the eval-AUC column ranks speed.
+# (Migrated from 0004_ppo_tuning; its winner + 6-turbine validation second stage
+# concluded "keep the defaults" -- see JOURNAL.md -- and is not re-run here.)
+
+seeds: [0, 1]
+gate: finite
+
+base:
+  experiment_name: 0001_ppo_sweep
+  seed: 0
+  device: cpu
+  n_iters: 40
+  frames_per_batch: 1000
+  eval_interval: 1
+  eval_episodes: 1
+  checkpoint_interval: 40
+
+  # 3-turbine westerly row, identical to the arch benchmark.
+  layout:
+    - [252.0, 1000.0]
+    - [756.0, 1000.0]
+    - [1260.0, 1000.0]
+
+  scenario:
+    name: fixed3
+    n_turbines: 3
+    max_steps: 20
+    map_x_length: 2000.0
+    map_y_length: 2000.0
+    min_distance_between_turbines: 400.0
+    fixed_wind_direction: 270.0
+    fixed_wind_speed: 8.0
+
+  model:
+    kind: mlp
+    num_cells: 64
+    depth: 2
+    initial_std: 0.3
+
+  # Baseline PPO (== the arch-benchmark default); arms below replace it wholesale.
+  ppo:
+    clip_epsilon: 0.2
+    gamma: 0.99
+    lmbda: 0.95
+    entropy_eps: 0.0
+    normalize_advantage: true
+    lr: 3.0e-4
+    max_grad_norm: 1.0
+    n_epochs: 8
+    num_minibatches: 4
+    lr_scheduler: true
+    min_lr: 1.0e-4
+
+  logging:
+    project: wind-rl
+    use_wandb: true
+
+# baseline inherits base.ppo (no override); every other arm gives a full ppo block.
+variants:
+  - name: baseline
+  - name: gradnorm5
+    ppo:
+      clip_epsilon: 0.2
+      gamma: 0.99
+      lmbda: 0.95
+      entropy_eps: 0.0
+      normalize_advantage: true
+      lr: 3.0e-4
+      max_grad_norm: 5.0
+      n_epochs: 8
+      num_minibatches: 4
+      lr_scheduler: true
+      min_lr: 1.0e-4
+  - name: gradnorm10
+    ppo:
+      clip_epsilon: 0.2
+      gamma: 0.99
+      lmbda: 0.95
+      entropy_eps: 0.0
+      normalize_advantage: true
+      lr: 3.0e-4
+      max_grad_norm: 10.0
+      n_epochs: 8
+      num_minibatches: 4
+      lr_scheduler: true
+      min_lr: 1.0e-4
+  - name: lr1e-3
+    ppo:
+      clip_epsilon: 0.2
+      gamma: 0.99
+      lmbda: 0.95
+      entropy_eps: 0.0
+      normalize_advantage: true
+      lr: 1.0e-3
+      max_grad_norm: 1.0
+      n_epochs: 8
+      num_minibatches: 4
+      lr_scheduler: true
+      min_lr: 1.0e-4
+  - name: gradnorm5_lr1e-3
+    ppo:
+      clip_epsilon: 0.2
+      gamma: 0.99
+      lmbda: 0.95
+      entropy_eps: 0.0
+      normalize_advantage: true
+      lr: 1.0e-3
+      max_grad_norm: 5.0
+      n_epochs: 8
+      num_minibatches: 4
+      lr_scheduler: true
+      min_lr: 1.0e-4
+  - name: gradnorm10_lr1e-3
+    ppo:
+      clip_epsilon: 0.2
+      gamma: 0.99
+      lmbda: 0.95
+      entropy_eps: 0.0
+      normalize_advantage: true
+      lr: 1.0e-3
+      max_grad_norm: 10.0
+      n_epochs: 8
+      num_minibatches: 4
+      lr_scheduler: true
+      min_lr: 1.0e-4
+  - name: entropy1e-3
+    ppo:
+      clip_epsilon: 0.2
+      gamma: 0.99
+      lmbda: 0.95
+      entropy_eps: 1.0e-3
+      normalize_advantage: true
+      lr: 3.0e-4
+      max_grad_norm: 1.0
+      n_epochs: 8
+      num_minibatches: 4
+      lr_scheduler: true
+      min_lr: 1.0e-4

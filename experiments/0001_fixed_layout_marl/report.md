@@ -1,124 +1,97 @@
-# 0001 — Fixed-layout MARL benchmark
+# 0001 — Fixed-layout MARL benchmark (unified framework)
 
-## Hypothesis
+## Framework
 
-On a **fixed** wind-farm layout, a set of MARL agent architectures — each a
-shared-parameter policy/critic trained by the same MAPPO loop (SyncDataCollector
--> GAE -> clipped-PPO minibatch updates -> deterministic eval -> checkpoint) —
-all *learn* wake steering under an identical PPO budget: each variant's
-deterministic-eval mean episode reward (total farm power) rises above its own
-early-training baseline. The benchmark tests learning per variant; it does
-**not** claim to rank architectures at this scale.
+One framework that trains a list of **config variants** under an identical PPO
+budget on a fixed wind-farm layout, harvests a comparable per-run metric, prints a
+cross-variant table, and asserts a per-variant verdict in code. The shape is shared
+across three concerns that used to be separate experiments; each is now a config
+entry point selected with `config=<name>` (default `config`):
 
-## Setup
+| entry point          | variants differ by      | gate       | layout                         |
+| -------------------- | ----------------------- | ---------- | ------------------------------ |
+| `config` (default)   | architecture (`model`)  | `improves` | fixed 3-turbine westerly row   |
+| `config=ppo_sweep`   | PPO levers (`ppo`)      | `finite`   | fixed 3-turbine westerly row   |
+| `config=real_farms`  | architecture (`model`)  | `finite`   | named wfcrl farm (translated)  |
 
-- **Scenario.** 3 turbines in a row at `[(252, 1000), (756, 1000), (1260, 1000)]`
-  (504 m ~= 4 D spacing), map 2000x2000, `max_steps=20`. Wind is **fixed** at
-  270 deg / 8 m/s (`scenario.fixed_wind_direction`). Fixed aligned wind is
-  deliberate: turbines 2 and 3 sit squarely in turbine 1's wake, giving large,
-  consistent wake-steering headroom and a noise-free deterministic eval. The
-  layout is a config choice — swap in a real fixed farm via
-  `wind_rl.scenario.real_farm_layout(<name>)` (matching `scenario.n_turbines`);
-  the row is the default.
-- **Variants (`conf/config.yaml`).** Each entry pairs a name with a typed `model`
-  config; `kind` discriminates the model union, so the benchmark grows by
-  appending to `variants`.
-  - **`mlp`** — `MultiAgentMLP` actor/critic, shared params, `num_cells=64`,
-    `depth=2`, `initial_std=0.3`.
-  - **`gcn`** — dense-adjacency graph conv (KNN, torch-native), `hidden_dim=64`,
-    `num_layers=2`, `initial_std=0.3`; the graph is rebuilt each forward from the
-    turbine layout, giving structural permutation equivariance.
-  - Both: yaw action is a per-step increment in [-5, +5] deg (`TanhNormal`);
-    centralized critic emitting one `state_value` per agent.
-- **PPO (identical across variants).** clip 0.2, gamma 0.99, lambda 0.95,
-  entropy 0.0, advantage normalized, Adam lr 3e-4 with cosine decay to 1e-4,
-  grad-clip 1.0, 8 epochs x 4 minibatches.
-- **Budget.** 40 iterations x 1000 frames (40k env steps) per variant, seed 0,
-  CPU/GPU agnostic. Logged online to wandb (`base.logging.use_wandb=true`,
-  project `wind-rl`); the loop runs identically with wandb disabled.
-- **Verdict (asserted in `run.py`, per variant).** Deterministic eval every
-  iteration; a variant PASSes iff the mean of the last third of its evals
-  strictly exceeds its first third. Each variant passes or fails independently;
-  the run exits nonzero iff any variant fails its own baseline.
+Run with wandb online (default) or disabled for a plumbing check:
 
-## Results
+```bash
+uv run python experiments/0001_fixed_layout_marl/run.py                 # arch benchmark
+uv run python experiments/0001_fixed_layout_marl/run.py config=ppo_sweep
+uv run python experiments/0001_fixed_layout_marl/run.py config=real_farms farm.name=HornsRev1
+WIND_RL_WANDB_MODE=disabled uv run python experiments/0001_fixed_layout_marl/run.py base.n_iters=2
+```
 
-**BENCHMARK PASS** — both variants learn. Total wall-clock **~494 s (~8 min)**,
-under budget. Real run, seed 0, wandb **online** to project `wind-rl`
-(deterministic-eval reward = total farm power).
+### Machinery (`wind_rl.experiment`)
 
-| variant | first window | last window |   delta | wall-clock | wandb                                                      |
-| ------- | -----------: | ----------: | ------: | ---------: | --------------------------------------------------------- |
-| `mlp`   |      32.2381 |     33.5124 | +1.2744 |    219.5 s | [o6sve6j7](https://wandb.ai/mark-haoxiang/wind-rl/runs/o6sve6j7) |
-| `gcn`   |      32.3501 |     33.2348 | +0.8847 |    274.8 s | [bjxu76k9](https://wandb.ai/mark-haoxiang/wind-rl/runs/bjxu76k9) |
+`run.py` is thin (compose config → `run_sweep` → `summarize`/`format_table` →
+per-variant verdict → exit code); everything reusable lives in the library:
 
-Both eval trajectories dip slightly in the first few iterations (initial
-exploration off the zero-yaw init) then climb near-monotonically: `mlp` reaches
-33.98 at the final iteration, `gcn` 33.37. Reference probes on this scenario
-(fixed-yaw holds): zero-yaw ~= 30.6 per episode, best fixed upstream steering
-(+25 deg) ~= 35.6 — both learned policies recover most of the available
-wake-steering gain.
+- **`sweep.py`** — `Variant` (name + `TrainingConfig` overrides, or a full config)
+  and `run_sweep(base, variants, seeds)`: the per-`(variant, seed)` loop that builds
+  the `TrainingConfig`, runs `MappoTrainer`, times it, and reduces its history to a
+  typed `RunResult` (windowed first/last/delta, eval AUC, wall-clock, finiteness).
+  It sets `WANDB_RUN_GROUP` / `WANDB_TAGS` per run so a variant's seeds share a wandb
+  group, and calls `wandb.teardown()` between runs so those env vars are re-read
+  rather than cached from the first init.
+- **`table.py`** — aggregates a variant's seeds to mean ± population-std and renders
+  the comparison table.
+- **`verdict.py`** — `windowed_delta` (first-third vs last-third mean of the
+  deterministic-eval trajectory) and the parameterised gates `improves(margin)`
+  (learning: last window beats own first window) and `is_finite()` (capability: all
+  metrics finite). No experiment-specific threshold is baked in.
+- Real farms are resolved by `wind_rl.scenario.resolve_real_farm`: it fetches the
+  named wfcrl layout and translates its native (possibly negative) metre frame so
+  the bounding-box corner sits at `(margin, margin)`, deriving the map bounds from
+  `bbox + margin`. Wake physics depend only on relative positions, so this keeps
+  every coordinate positive and in-map (what the mlp position normalisation, the
+  renderer axes, and the `layout` observation Box all assume) without altering the
+  physics. The scenario template (`base.scenario`) supplies max_steps, spacing, and
+  fixed wind; only name and geometry are derived.
 
-### Telemetry and framework health
+## Results (default arch benchmark)
 
-The trainer logs ~34 namespaced metrics per iteration (`train/ loss/ optim/
-time/ eval/ designer/`), a rendered eval-layout image, and an end-of-run
-checkpoint wandb Artifact; the identical dict is returned in-process so the
-verdict and tests need no wandb. Final-iteration health readout:
+The default `config` benchmarks architectures on the fixed 3-turbine westerly row
+`[(252,1000),(756,1000),(1260,1000)]` (map 2000×2000, `max_steps=20`), wind fixed at
+270°/8 m/s (deterministic eval, large wake-steering headroom), 40 iters × 1000
+frames, `gate=improves`. `mlp` and `gcn` learn wake steering (real seed-0 runs, wandb
+online to `wind-rl`; reward = total farm power):
 
-| metric                       |    mlp |    gcn |
-| ---------------------------- | -----: | -----: |
-| pre-clip grad norm           |   8.05 |   7.91 |
-| clip fraction                |  0.015 |  0.005 |
-| approx KL                    |  0.003 |  0.002 |
-| critic explained variance    |  -0.01 |  -0.01 |
-| policy entropy (base-normal) |   0.20 |   0.21 |
-| action yaw std (deg)         |   1.27 |   1.31 |
+| variant | first window | last window |   delta | wall-clock |
+| ------- | -----------: | ----------: | ------: | ---------: |
+| `mlp`   |      32.2381 |     33.5124 | +1.2744 |    219.5 s |
+| `gcn`   |      32.3501 |     33.2348 | +0.8847 |    274.8 s |
 
-PPO is stable and conservative — clip fraction < 2 % and approx-KL < 0.005 keep
-every update well inside the trust region. Two caveats the telemetry exposes,
-neither blocking (no tuning pass was needed): the pre-clip grad norm sits ~8x
-above `max_grad_norm = 1.0`, so grad clipping is active on every step (raising
-the clip or lowering lr is the lever if faster convergence is wanted); and
-critic explained variance is ~0 — under fixed wind the episode return is nearly
-constant, leaving little return variance for the value head to explain, yet
-normalized GAE advantages still drive the policy to the wake-steering optimum.
+Both trajectories dip in the first few iterations (exploration off the zero-yaw
+init) then climb near-monotonically. Reference probes: zero-yaw ≈ 30.6/episode, best
+fixed upstream steering (+25°) ≈ 35.6 — both learned policies recover most of the
+available gain. PPO is stable and conservative (clip fraction < 2 %, approx-KL <
+0.005 at this snapshot); two honest, non-blocking caveats the telemetry exposes:
+pre-clip grad norm sits ~8× above `max_grad_norm=1.0` (clip active every step), and
+critic explained variance is ~0 (under fixed wind the return is nearly constant, yet
+normalised GAE advantages still drive the policy). `set_transformer` (0003's
+front-runner) is included in the default variant set and is known to train on this
+regime (0003, 0005), but has not been run at full arch-benchmark budget here.
 
-### Scale probe (6-turbine row, `mlp`)
-
-An exploratory `mlp` run on a 6-turbine westerly row (x = 252..2772 m at 504 m
-spacing, map 3200x2000, 20 iters x 1000 frames) confirms the loop scales past
-the 3-turbine benchmark:
-
-| variant | first window | last window |   delta | wall-clock | wandb                                                      |
-| ------- | -----------: | ----------: | ------: | ---------: | --------------------------------------------------------- |
-| `mlp`   |      28.8248 |     32.0242 | +3.1994 |    164.3 s | [bsicnfgq](https://wandb.ai/mark-haoxiang/wind-rl/runs/bsicnfgq) |
-
-More downstream turbines in wake give larger headroom and a larger,
-near-monotonic delta (27.97 -> 32.26). Health metrics match the 3-turbine runs
-(grad norm 7.98, clip fraction 0, KL ~0, explained variance ~0). PASS.
-
-Per-variant checkpoints (policy/critic state_dicts + config) are written under
-`WIND_RL_WDIR/0001_fixed_layout_marl_<variant>/`; the final checkpoint is also
-uploaded as a wandb Artifact.
+The benchmark does **not** crown a winner at smoke scale: the KNN graph collapses to
+a nearly fully-connected 3-node graph and the headroom is small, so the `mlp`/`gcn`
+gap is not a meaningful ranking. Separating architectures needs a larger budget and
+more turbines (the `ppo_sweep` and `real_farms` entry points; 0003's proxy suite).
 
 ## Decision
 
-The fixed-layout MARL benchmark is settled as a framework: it trains an
-extensible set of architectures under one PPO budget on a shared fixed layout,
-gates each on its own learning verdict, and tabulates the comparison. Both `mlp`
-and `gcn` learn wake steering and PASS.
-
-This run does **not** crown a winner. At smoke scale (3 turbines, 40k steps) the
-`mlp` shows a larger windowed delta, but the KNN graph collapses to a nearly
-fully-connected 3-node graph and the headroom is small — the gap is not a
-meaningful architecture ranking. Separating the architectures needs a larger
-budget and more turbines, where the GCN's permutation equivariance and locality
-are expected to matter; scaling turbine count and adding further variants (still
-fixed-layout) is the next step here. Co-design (per-episode designed layouts) is
-a separate framework, starting at 0002+.
+The fixed-layout MARL benchmark is settled as a **single framework** with three
+config entry points sharing one library loop, table, and gate set. The default arch
+benchmark PASSes (both `mlp` and `gcn` learn wake steering). The PPO-lever sweep and
+the real-farm capability study are the same framework under different configs and
+gates; their concluded verdicts are recorded in `experiments/JOURNAL.md` (no lever
+beat the PPO defaults beyond seed noise; MAPPO trains to completion with finite,
+stable telemetry on real farms up to 80 turbines with a ~11–12× parallel-collection
+speedup). New studies of this shape are new **config variant sets** here, not new
+experiment directories.
 
 Caveat carried forward: the fixed-wind regime is what exposes a clean learning
-signal at this scale. Under wfcrl's random wind a *wind-conditioned* policy is
-required to beat zero-yaw and the average headroom is small — a stronger test
-for later, ideally with a per-direction evaluation protocol.
+signal at this scale. Under wfcrl's random wind a wind-conditioned policy is required
+and the average headroom is small — a stronger test for later, ideally with a
+per-direction evaluation protocol.
