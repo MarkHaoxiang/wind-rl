@@ -1,24 +1,27 @@
 """0003_arch_bench: an independent architecture-benchmark suite.
 
 Ranks the policy/critic architectures in the :data:`ModelConfig` union
-(``mlp`` / ``gcn`` / ``set_transformer``) in minutes, NOT full training runs,
-via the two fast proxy tasks from ``docs/research/2026-07-19-geometric-architectures.md``
-S5:
+(``mlp`` / ``gcn`` / ``set_transformer``) via two fast proxy tasks from
+``docs/research/2026-07-19-geometric-architectures.md`` S5:
 
-1. **Critic proxy** -- supervised value regression. A random-policy dataset of
-   per-agent observations + empirical discounted returns on a fixed 8-turbine
-   FLORIS layout (cached under ``WIND_RL_WDIR``) is regressed by each
-   architecture's critic under an identical optimiser budget; scored by
-   validation MSE and explained variance vs a predict-the-mean baseline.
-2. **Policy proxy** -- fixed-budget MAPPO. Short identical-budget PPO runs per
-   architecture over several seeds on the same layout; scored by the windowed
-   deterministic-eval reward delta and wall-clock per iteration.
+1. **Critic proxy** -- supervised value regression (``critic_proxy.py``). A
+   random-policy dataset of per-agent observations + empirical discounted returns
+   on a fixed FLORIS layout (cached under ``WIND_RL_WDIR``) is regressed by each
+   architecture's critic under an identical optimiser budget; scored by validation
+   MSE and explained variance vs a predict-the-mean baseline.
+2. **Policy proxy** -- fixed-budget MAPPO (``policy_proxy.py``), which delegates to
+   the shared :func:`~wind_rl.experiment.sweep.run_sweep` loop: identical-budget
+   PPO runs per architecture over several seeds on the same layout, scored by the
+   windowed deterministic-eval reward delta and wall-clock.
 
-Deliverable: one comparison table over architectures x {critic EV, policy delta,
-s/iter, params}. Verdict asserted IN CODE: every architecture is FUNCTIONAL --
-critic EV clears the gate AND every PPO seed completes with finite metrics. The
-benchmark does NOT crown a winner at this scale (see ``report.md`` Decision).
-Exits nonzero iff any architecture is non-functional.
+Three profiles select via ``--config-name``: ``config`` (quick, fixed wind, 8t),
+``decisive`` (varied wind, 8+16t, 20 iters), and ``tiebreak`` (varied wind,
+gcn vs set_transformer to convergence). The sweep loop, wandb grouping, windowed
+delta, and finiteness gate live in ``wind_rl.experiment`` (sweep/table/verdict);
+this script composes config, joins the two proxies into one comparison table, and
+asserts the verdict IN CODE: every architecture is FUNCTIONAL -- critic EV clears
+the gate AND every PPO seed completes with finite metrics. Exits nonzero iff any
+architecture is non-functional.
 """
 
 from __future__ import annotations
@@ -28,15 +31,17 @@ from pathlib import Path
 
 import numpy as np
 from critic_proxy import CriticProxyConfig, CriticResult, run_critic_proxy
-from hydra import compose, initialize_config_dir
 from numpy.typing import NDArray
-from omegaconf import DictConfig
-from policy_proxy import PolicyResult, run_policy_proxy
+from policy_proxy import run_policy_proxy
 from pydantic import Field
 
 from wind_rl.config import Config
 from wind_rl.design.geometry import is_feasible, sample_feasible_layout
+from wind_rl.experiment.cli import compose_experiment
 from wind_rl.experiment.settings import WindRlSettings
+from wind_rl.experiment.sweep import RunResult, SweepResult
+from wind_rl.experiment.table import VariantSummary, summarize
+from wind_rl.experiment.verdict import is_finite
 from wind_rl.models import ModelConfig
 from wind_rl.rl.mappo import PPOConfig
 from wind_rl.rl.trainer import LoggingConfig, TrainingConfig
@@ -71,6 +76,7 @@ class PolicyConfig(Config):
     seeds: list[int] = Field(min_length=2)
     n_iters: int = Field(gt=0)
     frames_per_batch: int = Field(gt=0)
+    n_envs: int | None = 1
     eval_episodes: int = Field(gt=0)
     ppo: PPOConfig = PPOConfig()
 
@@ -86,9 +92,8 @@ class ExperimentConfig(Config):
     tiers: list[TierConfig] = Field(min_length=1)
 
 
-def _compose(argv: list[str]) -> DictConfig:
-    config_name = "config"
-    overrides: list[str] = []
+def _parse_args(argv: list[str]) -> tuple[str, list[str]]:
+    config_name, overrides = "config", []
     it = iter(argv)
     for arg in it:
         if arg == "--config-name":
@@ -97,9 +102,7 @@ def _compose(argv: list[str]) -> DictConfig:
             config_name = arg.split("=", 1)[1]
         else:
             overrides.append(arg)
-    conf_dir = str(Path(__file__).parent / "conf")
-    with initialize_config_dir(version_base=None, config_dir=conf_dir):
-        return compose(config_name=config_name, overrides=overrides)
+    return config_name, overrides
 
 
 def _base_training_config(
@@ -113,6 +116,7 @@ def _base_training_config(
         device=cfg.device,
         n_iters=cfg.policy.n_iters,
         frames_per_batch=cfg.policy.frames_per_batch,
+        n_envs=cfg.policy.n_envs,
         eval_interval=1,
         eval_episodes=cfg.policy.eval_episodes,
         checkpoint_interval=cfg.policy.n_iters,
@@ -125,13 +129,15 @@ def _base_training_config(
 
 def _print_table(
     tier: str,
+    n_iters: int,
     critic: list[CriticResult],
-    policy: list[PolicyResult],
-    seeds: list[int],
+    policy: SweepResult,
+    summaries: list[VariantSummary],
 ) -> None:
-    critic_by_name = {c.name: c for c in critic}
-    policy_by_name = {p.name: p for p in policy}
-    names = [c.name for c in critic]
+    summary_by_name = {s.name: s for s in summaries}
+    seeds_by_name: dict[str, list[RunResult]] = {}
+    for run in policy.runs:
+        seeds_by_name.setdefault(run.variant, []).append(run)
 
     header = (
         f"{'arch':<16}{'critic_EV':>10}{'critic_MSE':>11}"
@@ -140,27 +146,27 @@ def _print_table(
     print(f"\ncomparison [{tier}]")
     print(header)
     print("-" * len(header))
-    for name in names:
-        c = critic_by_name[name]
-        p = policy_by_name[name]
-        functional = c.explained_variance > 0.0 and p.functional
+    for c in critic:
+        s = summary_by_name[c.name]
+        functional = c.explained_variance > 0.0 and s.passed
         print(
-            f"{name:<16}{c.explained_variance:>+10.4f}{c.val_mse:>11.4f}"
-            f"{p.mean_delta:>+9.3f}{p.std_delta:>8.3f}{p.s_per_iter:>8.2f}"
+            f"{c.name:<16}{c.explained_variance:>+10.4f}{c.val_mse:>11.4f}"
+            f"{s.delta_mean:>+9.3f}{s.delta_std:>8.3f}{s.seconds / n_iters:>8.2f}"
             f"{c.params:>9}  {'FUNCTIONAL' if functional else 'NON-FUNCTIONAL'}"
         )
     per_seed = "  ".join(
-        f"{name}: "
-        + ",".join(
-            f"s{sr.seed}{sr.delta:+.3f}" for sr in policy_by_name[name].seed_results
-        )
-        for name in names
+        f"{c.name}: "
+        + ",".join(f"s{r.seed}{r.delta:+.3f}" for r in seeds_by_name[c.name])
+        for c in critic
     )
     print(f"per-seed deltas [{tier}]  {per_seed}")
 
 
 def main() -> int:
-    cfg = ExperimentConfig.from_raw(_compose(sys.argv[1:]))
+    config_name, overrides = _parse_args(sys.argv[1:])
+    cfg = compose_experiment(
+        Path(__file__).parent / "conf", ExperimentConfig, overrides, config_name
+    )
     wdir = WindRlSettings().resolved_wdir / cfg.experiment_name
 
     critic_cfg = CriticProxyConfig(
@@ -187,18 +193,19 @@ def main() -> int:
         )
 
         base = _base_training_config(cfg, tier, layout)
-        policy_results = run_policy_proxy(base, variants, cfg.policy.seeds, tier.name)
+        policy = run_policy_proxy(base, variants, cfg.policy.seeds)
+        summaries = summarize(policy, is_finite())
 
-        _print_table(tier.name, critic_results, policy_results, cfg.policy.seeds)
+        _print_table(tier.name, cfg.policy.n_iters, critic_results, policy, summaries)
 
         critic_by_name = {c.name: c for c in critic_results}
-        policy_by_name = {p.name: p for p in policy_results}
+        summary_by_name = {s.name: s for s in summaries}
         non_functional += [
             f"{tier.name}/{name}"
             for name, _ in variants
             if not (
                 critic_by_name[name].explained_variance > cfg.critic.ev_gate
-                and policy_by_name[name].functional
+                and summary_by_name[name].passed
             )
         ]
 
