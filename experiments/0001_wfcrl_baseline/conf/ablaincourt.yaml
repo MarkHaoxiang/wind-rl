@@ -1,0 +1,65 @@
+# 0001_wfcrl_baseline / ablaincourt -- WFCRL Scenario I on Dec_Ablaincourt_Floris.
+#
+# The 7-turbine real French farm (Ablaincourt). `farm.name=Ablaincourt` fetches
+# the wfcrl coordinates and `resolve_real_farm` translates them in-map. PPO block
+# is identical to turb3_row1 (the official setup is farm-agnostic). Budget 2e5
+# frames: the paper reports 1-2M for Ablaincourt but its own curves converge well
+# before that, so we run 2e5 with the option to extend (eval curves + checkpoints
+# stream to wandb) if it is still rising.
+
+farm:
+  name: Ablaincourt
+  margin: 500.0
+
+seeds: [0, 1]
+
+base:
+  experiment_name: 0001_wfcrl_ablaincourt
+  device: cpu
+  # 98 * 2048 = 200704 ~= 2e5 total frames.
+  n_iters: 98
+  frames_per_batch: 2048
+  n_envs: 1
+  eval_interval: 5
+  eval_episodes: 1
+  checkpoint_interval: 10
+
+  scenario:
+    # name / n_turbines / map_*_length are overwritten by resolve_real_farm.
+    name: wfcrl_placeholder
+    n_turbines: 1
+    max_steps: 150
+    map_x_length: 1.0
+    map_y_length: 1.0
+    min_distance_between_turbines: 150.0
+    fixed_wind_direction: 270.0
+    fixed_wind_speed: 8.0
+    load_coef: 1.0
+
+  ppo:
+    clip_epsilon: 0.2
+    gamma: 0.99
+    lmbda: 0.95
+    entropy_eps: 0.0
+    normalize_advantage: true
+    vf_coef: 0.5
+    clip_value_loss: true
+    lr: 3.0e-4
+    adam_eps: 1.0e-5
+    max_grad_norm: 0.5
+    n_epochs: 10
+    num_minibatches: 32
+    reward_batch_norm: true
+    lr_anneal: linear
+
+  logging:
+    project: wind-rl
+    use_wandb: true
+
+variants:
+  - name: mlp
+    model:
+      kind: mlp
+      num_cells: 64
+      depth: 2
+      initial_std: 1.0
