@@ -9,11 +9,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
+from numpy.typing import NDArray
 from torchrl.envs.utils import check_env_specs
 
 pytest.importorskip("wfcrl")
 
-from wind_rl.env import RewardNormalisation, make_env, render_layout
+from wind_rl.env import RewardNormalisation, make_env, render_farm
 from wind_rl.scenario import ScenarioConfig
 
 pytestmark = pytest.mark.sim
@@ -123,10 +124,30 @@ def test_default_layout_infeasible_scenario_raises() -> None:
         make_env("train", infeasible)
 
 
-def test_render_layout_returns_rgb(scenario: ScenarioConfig) -> None:
-    """Layout render returns an (H, W, 3) uint8 array."""
-    layout = np.array([[100.0, 100.0], [900.0, 100.0], [1700.0, 100.0]])
-    image = render_layout(layout, scenario)
+_RENDER_LAYOUT = np.array([[100.0, 1000.0], [900.0, 1000.0], [1700.0, 1000.0]])
+
+
+def _render_at_wind(
+    scenario: ScenarioConfig, wind: tuple[float, float]
+) -> NDArray[np.uint8]:
+    env = make_env("train", scenario)
+    env.base_env.set_layout_override(_RENDER_LAYOUT)
+    env.base_env.set_wind_override(wind)
+    env.reset()
+    return render_farm(env.base_env.designable_env)
+
+
+def test_render_farm_returns_rgb(scenario: ScenarioConfig) -> None:
+    """The wake-resolved render returns an (H, W, 3) uint8 array."""
+    image = _render_at_wind(scenario, (270.0, 8.0))
     assert image.ndim == 3
     assert image.shape[2] == 3
     assert image.dtype == np.uint8
+
+
+def test_render_farm_flow_field_responds_to_wind(scenario: ScenarioConfig) -> None:
+    """The wake-resolved flow field is real: two wind directions differ pixel-wise."""
+    image_west = _render_at_wind(scenario, (270.0, 8.0))
+    image_sw = _render_at_wind(scenario, (200.0, 8.0))
+    assert image_west.shape == image_sw.shape
+    assert not np.array_equal(image_west, image_sw)

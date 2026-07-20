@@ -26,7 +26,7 @@ from torchrl.envs.utils import ExplorationType, set_exploration_type
 from wind_rl.config import Config
 from wind_rl.design import Designer, DesignerConfig, create_designer
 from wind_rl.env.factory import make_env
-from wind_rl.env.render import render_layout
+from wind_rl.env.render import render_farm
 from wind_rl.experiment.settings import WindRlSettings
 from wind_rl.models import ModelConfig, build_actor_critic
 from wind_rl.models.mlp import MlpModelConfig
@@ -159,19 +159,19 @@ class MappoTrainer:
     def _eval(self, policy: torch.nn.Module) -> _EvalResult:
         env = self._make_env("eval")
         rewards = []
-        last_rollout: TensorDictBase | None = None
         with torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
             for _ in range(self.cfg.eval_episodes):
                 rollout = env.rollout(
                     self.cfg.scenario.max_steps, policy, break_when_any_done=True
                 )
                 rewards.append(float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean()))
-                last_rollout = rollout
+        # Render the live wake-resolved flow field before the env is torn down.
+        render = _render_eval(env)
         env.close()
         return _EvalResult(
             float(np.mean(rewards)),
             float(np.std(rewards)),
-            _render_eval(last_rollout, self.cfg.scenario),
+            render,
         )
 
     def _save_checkpoint(
@@ -340,21 +340,8 @@ def _accumulate_diagnostics(
             diagnostics.setdefault(metric, []).append(float(loss_vals[key].mean()))
 
 
-def _render_eval(
-    rollout: TensorDictBase | None, scenario: ScenarioConfig
-) -> NDArray[np.uint8] | None:
-    if rollout is None:
-        return None
+def _render_eval(env: object) -> NDArray[np.uint8] | None:
     try:
-        state = rollout["next", "state"]
-        return render_layout(
-            state["layout"][-1].numpy(force=True),
-            scenario,
-            state={
-                "wind_speed": state["wind_speed"][-1].numpy(force=True),
-                "wind_direction": state["wind_direction"][-1].numpy(force=True),
-                "yaw": state["yaw"][-1].numpy(force=True),
-            },
-        )
+        return render_farm(env.base_env.designable_env)  # type: ignore[attr-defined]
     except Exception:  # pragma: no cover - render is best-effort telemetry
         return None

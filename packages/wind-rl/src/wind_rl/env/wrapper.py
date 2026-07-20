@@ -67,6 +67,16 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
             **kwargs,
         )
 
+    @property
+    def designable_env(self) -> object:
+        """The wrapped :class:`DesignableWindFarmEnv` (through the PettingZoo hop).
+
+        Exposed so the visualiser can reach the live FLORIS interface for
+        wake-resolved rendering. ``self._env`` is an ``aec_to_parallel`` wrapper;
+        its ``aec_env`` is the designable env.
+        """
+        return self._env.aec_env
+
     def set_layout_override(
         self, layout: torch.Tensor | NDArray[np.float64] | None
     ) -> None:

@@ -21,7 +21,7 @@ import os
 import shutil
 from collections import OrderedDict
 from collections.abc import Mapping
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 import numpy as np
 from gymnasium import spaces
@@ -34,6 +34,11 @@ from wfcrl.multiagent_env import MAWindFarmEnv
 from wfcrl.rewards import DoNothingReward
 
 from wind_rl.scenario import ScenarioConfig
+
+if TYPE_CHECKING:
+    from floris.tools import (
+        FlorisInterface as FlorisSimulator,  # type: ignore[import-untyped]
+    )
 
 
 class ResetOptions(TypedDict, total=False):
@@ -96,6 +101,14 @@ class DesignableWindFarmEnv(MAWindFarmEnv):  # type: ignore[misc]
         self.state_space["layout"] = spaces.Box(
             low=0.0, high=np.inf, shape=(self.num_turbines, 2), dtype=np.float32
         )
+
+    @property
+    def floris(self) -> FlorisSimulator:
+        """The live ``floris.tools.FlorisInterface`` behind the wfcrl interface.
+
+        The visualiser uses it to compute the wake-resolved hub-height flow plane.
+        """
+        return self.mdp.interface.fi
 
     def reset(
         self,
