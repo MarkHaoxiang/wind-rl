@@ -24,7 +24,7 @@ from torch.nn.utils import clip_grad_norm_
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, ReplayBuffer, SamplerWithoutReplacement
 from torchrl.envs import EnvBase, ParallelEnv, SerialEnv, TransformedEnv
-from torchrl.envs.utils import ExplorationType, set_exploration_type
+from torchrl.envs.utils import ExplorationType, set_exploration_type, step_mdp
 
 from wind_rl.config import Config
 from wind_rl.design import (
@@ -46,7 +46,12 @@ from wind_rl.rl.logging import (
     explained_variance,
     param_norms,
 )
-from wind_rl.rl.mappo import PPOConfig, build_loss_module, build_optimiser
+from wind_rl.rl.mappo import (
+    PPOConfig,
+    batch_normalise_reward,
+    build_loss_module,
+    build_optimiser,
+)
 from wind_rl.scenario import ScenarioConfig
 from wind_rl.static import GROUP_NAME
 from wind_rl.utils import resolve_device, seed_all
@@ -58,6 +63,7 @@ _DONE_KEY = (GROUP_NAME, "done")
 _STATE_VALUE_KEY = (GROUP_NAME, "state_value")
 _SCALE_KEY = (GROUP_NAME, "scale")
 _ACTION_KEY = (GROUP_NAME, "action", "yaw")
+_POWER_KEY = ("power",)
 _GAUSSIAN_ENTROPY_CONST = 0.5 * math.log(2.0 * math.pi * math.e)
 #: Upper bound on auto-resolved parallel env workers (DiCoDe's ParallelEnv cap).
 _AUTO_ENV_CAP = 20
@@ -130,6 +136,7 @@ class TrainingConfig(Config):
 class _EvalResult(NamedTuple):
     reward_mean: float
     reward_std: float
+    power_mean: float
     image: NDArray[np.uint8] | None
     replay_html: str | None
 
@@ -170,6 +177,10 @@ def _rollout_metrics(data: TensorDictBase) -> dict[str, float]:
         "train/action_yaw_std": float(action.std(unbiased=False)),
         "train/action_yaw_min": float(action.min()),
         "train/action_yaw_max": float(action.max()),
+        # |dyaw| tracks the actuation budget (wfcrl zeroes yaw once cumulative
+        # actuation exceeds ~10% of the horizon), so it must stay observable.
+        "train/action_yaw_abs_mean": float(action.abs().mean()),
+        "train/step_power_mw": float(data["next", *_POWER_KEY].mean()),
         "train/policy_entropy": float(
             (_GAUSSIAN_ENTROPY_CONST + data[_SCALE_KEY].log()).mean()
         ),
@@ -250,32 +261,51 @@ class MappoTrainer:
     def _eval(self, policy: torch.nn.Module, record_replay: bool) -> _EvalResult:
         env = self._make_env("eval")
         max_steps = self.cfg.scenario.max_steps
-        rewards = []
+        rewards: list[float] = []
+        powers: list[float] = []
         replay_html: str | None = None
         with torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
             for episode in range(self.cfg.eval_episodes):
                 is_last = episode == self.cfg.eval_episodes - 1
+                rollout = env.rollout(max_steps, policy, break_when_any_done=True)
+                rewards.append(float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean()))
+                powers.append(float(rollout["next", *_POWER_KEY].mean()))
                 # Instrument the final eval episode for the replay instead of
                 # spending a whole extra FLORIS-heavy episode on it.
                 if record_replay and is_last:
-                    reward, replay_html = _record_last_eval_episode(
-                        env, policy, max_steps
-                    )
-                    rewards.append(reward)
-                else:
-                    rollout = env.rollout(max_steps, policy, break_when_any_done=True)
-                    rewards.append(
-                        float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean())
-                    )
+                    replay_html = _replay_html(env, policy)
         # Render the live wake-resolved flow field before the env is torn down.
         render = _render_eval(env)
         env.close()
         return _EvalResult(
             float(np.mean(rewards)),
             float(np.std(rewards)),
+            float(np.mean(powers)),
             render,
             replay_html,
         )
+
+    def _greedy_baseline_power(self) -> float:
+        """Mean farm power (MW) over one episode of zero-yaw (greedy) control.
+
+        Computed once at startup so the eval power gain is readable as a
+        percentage over the do-nothing baseline the paper compares against.
+        """
+        env = self._make_env("eval")
+        max_steps = self.cfg.scenario.max_steps
+        action_key = env.action_key
+        zero_action = env.full_action_spec[action_key].zero()
+        powers: list[float] = []
+        td = env.reset()
+        for _ in range(max_steps):
+            td.set(action_key, zero_action)
+            td = env.step(td)
+            powers.append(float(td["next", *_POWER_KEY].mean()))
+            if bool(td["next", *_DONE_KEY].any()):
+                break
+            td = step_mdp(td)
+        env.close()
+        return float(np.mean(powers))
 
     def _save_checkpoint(
         self, policy: torch.nn.Module, critic: torch.nn.Module, tag: str
@@ -334,6 +364,8 @@ class MappoTrainer:
             batch_size=minibatch_size,
         )
 
+        baseline_power = self._greedy_baseline_power()
+
         logger = RunLogger(cfg, self.settings)
         history: list[dict[str, float]] = []
         t_prev = time.perf_counter()
@@ -344,12 +376,22 @@ class MappoTrainer:
             for iteration, data in enumerate(collector):
                 collect_s = time.perf_counter() - t_prev
                 t0 = time.perf_counter()
+                # Standardise rewards over the rollout before GAE, then restore
+                # the raw reward: the loss consumes the stored advantage/value
+                # target, so restoring keeps the logged reward/power honest
+                # without changing the update.
+                raw_reward: torch.Tensor | None = None
+                if cfg.ppo.reward_batch_norm:
+                    raw_reward = data["next", *_REWARD_KEY].clone()
+                    data["next", *_REWARD_KEY] = batch_normalise_reward(raw_reward)
                 with torch.no_grad():
                     loss_module.value_estimator(
                         data,
                         params=loss_module.critic_network_params,
                         target_params=loss_module.target_critic_network_params,
                     )
+                if raw_reward is not None:
+                    data["next", *_REWARD_KEY] = raw_reward
                 replay_buffer.empty()
                 replay_buffer.extend(data.reshape(-1))
 
@@ -416,6 +458,13 @@ class MappoTrainer:
                     eval_s = time.perf_counter() - t0
                     metrics["eval/episode_reward_mean"] = result.reward_mean
                     metrics["eval/episode_reward_std"] = result.reward_std
+                    metrics["eval/episode_power_mw"] = result.power_mean
+                    metrics["eval/baseline_power_mw"] = baseline_power
+                    metrics["eval/power_gain"] = (
+                        result.power_mean / baseline_power - 1.0
+                        if baseline_power > 0.0
+                        else float("nan")
+                    )
                     if result.image is not None:
                         images["eval/layout"] = result.image
                     if result.replay_html is not None:
@@ -514,19 +563,9 @@ def _render_eval(env: object) -> NDArray[np.uint8] | None:
         return None
 
 
-def _record_last_eval_episode(
-    env: TransformedEnv, policy: torch.nn.Module, max_steps: int
-) -> tuple[float, str | None]:
-    """Run the final eval episode as an instrumented replay: ``(reward, html)``.
-
-    ``record_episode`` manually steps the env (reading live FLORIS per step), so
-    its terminal mean episode reward is the same metric a plain ``env.rollout``
-    would report -- no separate scoring episode is needed. Replay is best-effort
-    telemetry, so on failure it falls back to a plain rollout for the reward.
-    """
+def _replay_html(env: TransformedEnv, policy: torch.nn.Module) -> str | None:
+    """Best-effort interactive HTML replay of one deterministic episode."""
     try:
-        traj = record_episode(env, policy)
-        return traj.cumulative_reward[-1], build_replay_html(traj)
+        return build_replay_html(record_episode(env, policy))
     except Exception:  # pragma: no cover - replay is best-effort telemetry
-        rollout = env.rollout(max_steps, policy, break_when_any_done=True)
-        return float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean()), None
+        return None
