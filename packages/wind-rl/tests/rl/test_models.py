@@ -7,9 +7,9 @@ import torch
 pytest.importorskip("wfcrl")
 
 from wind_rl.env.factory import make_env
-from wind_rl.env.windfarm import GROUP_NAME
 from wind_rl.models.mlp import MlpModelConfig, build_mlp_actor_critic
 from wind_rl.scenario import ScenarioConfig
+from wind_rl.static import GROUP_NAME
 
 pytestmark = pytest.mark.sim
 

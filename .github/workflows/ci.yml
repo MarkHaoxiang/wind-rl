@@ -68,6 +68,12 @@ jobs:
       - name: Mypy
         run: uv run --no-sync mypy packages/wind-rl/src packages/wind-rl/tests
 
+      # Experiments are standalone Hydra scripts in digit-prefixed dirs (run.py
+      # collides as a duplicate module across dirs), so each dir is checked on
+      # its own, mirroring the pre-commit hook.
+      - name: Mypy (experiments, per directory)
+        run: for d in experiments/*/; do uv run --no-sync mypy "$d" || exit 1; done
+
       # `wfcrl` (the workspace member) needs system MPI + FLORIS, which the
       # runner does not provide, so the FLORIS-touching tests are marked `sim`
       # and excluded here. They still run locally and in the pre-commit hook,

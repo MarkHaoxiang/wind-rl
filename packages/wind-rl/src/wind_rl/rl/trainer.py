@@ -24,12 +24,12 @@ from wandb.sdk.wandb_run import Run
 from wind_rl.config import Config
 from wind_rl.design import Designer, DesignerConfig, create_designer
 from wind_rl.env.factory import make_env
-from wind_rl.env.windfarm import GROUP_NAME
 from wind_rl.experiment.settings import WindRlSettings
 from wind_rl.models import ModelConfig, build_actor_critic
 from wind_rl.models.mlp import MlpModelConfig
 from wind_rl.rl.mappo import PPOConfig, build_loss_module, build_optimiser
 from wind_rl.scenario import ScenarioConfig
+from wind_rl.static import GROUP_NAME
 from wind_rl.utils import resolve_device, seed_all
 
 _REWARD_KEY = (GROUP_NAME, "reward")

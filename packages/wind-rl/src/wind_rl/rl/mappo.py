@@ -8,7 +8,7 @@ from torch import optim
 from torchrl.objectives import ClipPPOLoss, ValueEstimators
 
 from wind_rl.config import Config
-from wind_rl.env.windfarm import GROUP_NAME
+from wind_rl.static import GROUP_NAME
 
 _VALUE_KEY: NestedKey = (GROUP_NAME, "state_value")
 _LOG_PROB_KEY: NestedKey = (GROUP_NAME, "sample_log_prob")

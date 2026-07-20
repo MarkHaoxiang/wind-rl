@@ -13,7 +13,6 @@ pytest.importorskip("wfcrl")
 
 from wind_rl.design import RandomDesignerConfig
 from wind_rl.env.factory import make_env
-from wind_rl.env.windfarm import GROUP_NAME
 from wind_rl.models import build_actor_critic
 from wind_rl.models.mlp import MlpModelConfig
 from wind_rl.rl.mappo import PPOConfig
@@ -23,6 +22,7 @@ from wind_rl.rl.trainer import (
     TrainingConfig,
 )
 from wind_rl.scenario import ScenarioConfig
+from wind_rl.static import GROUP_NAME
 from wind_rl.utils import seed_all
 
 pytestmark = pytest.mark.sim

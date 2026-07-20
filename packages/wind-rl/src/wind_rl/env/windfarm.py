@@ -35,11 +35,6 @@ from wfcrl.rewards import DoNothingReward
 
 from wind_rl.scenario import ScenarioConfig
 
-#: Name of the single agent group (all turbines share one policy/critic).
-GROUP_NAME = "turbine"
-#: Name of the environment family.
-ENV_NAME = "wfcrl"
-
 
 class ResetOptions(TypedDict, total=False):
     """``reset(options=...)`` payload honoured by :class:`DesignableWindFarmEnv`."""

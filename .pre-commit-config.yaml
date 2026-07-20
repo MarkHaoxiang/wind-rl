@@ -15,7 +15,10 @@ repos:
         files: ^(packages/wind-rl/(src|tests)|experiments)/
       - id: mypy
         name: mypy
-        entry: uv run mypy packages/wind-rl/src packages/wind-rl/tests
+        # Experiments are standalone Hydra scripts in digit-prefixed dirs (run.py
+        # collides as a duplicate module across dirs), so each dir is checked on
+        # its own.
+        entry: bash -c 'uv run mypy packages/wind-rl/src packages/wind-rl/tests && for d in experiments/*/; do uv run mypy "$d" || exit 1; done'
         language: system
         types: [python]
         pass_filenames: false

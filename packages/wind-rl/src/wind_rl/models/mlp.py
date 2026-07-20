@@ -25,8 +25,8 @@ from torchrl.envs import EnvBase
 from torchrl.modules import MultiAgentMLP, ProbabilisticActor, TanhNormal
 
 from wind_rl.config import Config
-from wind_rl.env.windfarm import GROUP_NAME
 from wind_rl.scenario import ScenarioConfig
+from wind_rl.static import GROUP_NAME
 
 _OBS_FEATURES = ("wind_direction", "wind_speed", "yaw", "layout")
 _OBS_KEYS = [(GROUP_NAME, "observation", name) for name in _OBS_FEATURES]

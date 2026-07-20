@@ -26,9 +26,10 @@ from torchrl.envs import Compose, RemoveEmptySpecs, RewardSum, TransformedEnv
 
 from wind_rl.design.geometry import is_feasible
 from wind_rl.env.transforms import RewardNormalisation
-from wind_rl.env.windfarm import GROUP_NAME, build_designable_windfarm
+from wind_rl.env.windfarm import build_designable_windfarm
 from wind_rl.env.wrapper import WfcrlCoDesignWrapper
 from wind_rl.scenario import ScenarioConfig
+from wind_rl.static import GROUP_NAME
 
 _REWARD_KEY = (GROUP_NAME, "reward")
 _EPISODE_REWARD_KEY = (GROUP_NAME, "episode_reward")

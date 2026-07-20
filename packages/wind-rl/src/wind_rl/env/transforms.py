@@ -16,7 +16,7 @@ from tensordict import TensorDictBase
 from tensordict.utils import NestedKey
 from torchrl.envs.transforms import Transform
 
-from wind_rl.env.windfarm import GROUP_NAME
+from wind_rl.static import GROUP_NAME
 
 _DEFAULT_REWARD_KEY: NestedKey = (GROUP_NAME, "reward")
 
