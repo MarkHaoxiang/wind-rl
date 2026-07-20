@@ -34,3 +34,11 @@ to the run/report. See `experiments/README.md` for the contract.
   (not 0001's snapshot 0.003/<2%), so the clip is not the bottleneck. 6-turbine
   validation ties baseline (+2.64) and gradnorm5 (+2.60). Decision: keep
   lr=3e-4, max_grad_norm=1.0, entropy_eps=0. See `0004_ppo_tuning/report.md`.
+- `0005_real_farm` — PASS (capability) — first MARL training on REAL wfcrl
+  layouts: Ormonde (30t, 40 iters) and HornsRev1 (80t, 5-iter smoke), both
+  variants, online. Runs complete with finite, PPO-stable telemetry at
+  production scale (real coords translated in-map, physics preserved). First
+  production use of the parallel collector: `n_envs` auto→20 gives ~11–12×
+  collect speedup (FLORIS ~0.9 ms/turbine/step). Learning honest: Ormonde flat
+  (fixed-wind cluster, little headroom); HornsRev1 `mlp` learns +1.16 in 5 iters.
+  See `0005_real_farm/report.md`.
