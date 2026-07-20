@@ -43,6 +43,21 @@ def improves(margin: float = 0.0) -> Gate:
     return lambda run: run.delta > margin
 
 
+def improves_ratio(factor: float) -> Gate:
+    """Gate: the last-window mean is at least ``factor`` times the first-window mean."""
+    return lambda run: run.last >= run.first * factor
+
+
+def exceeds(metric: str, threshold: float) -> Gate:
+    """Gate: the run's final harvested ``metric`` (from ``extra``) is ``>= threshold``."""
+    return lambda run: run.extra.get(metric, nan) >= threshold
+
+
+def all_of(*gates: Gate) -> Gate:
+    """Gate: every supplied gate passes."""
+    return lambda run: all(gate(run) for gate in gates)
+
+
 def is_finite() -> Gate:
     """Gate: the run completed with every logged metric finite (capability)."""
     return lambda run: run.finite

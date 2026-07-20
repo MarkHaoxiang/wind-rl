@@ -11,20 +11,35 @@ import math
 
 from wind_rl.experiment.sweep import RunResult, SweepResult
 from wind_rl.experiment.table import format_table, summarize
-from wind_rl.experiment.verdict import improves, is_finite, windowed_delta
+from wind_rl.experiment.verdict import (
+    all_of,
+    exceeds,
+    improves,
+    improves_ratio,
+    is_finite,
+    windowed_delta,
+)
 
 
-def _run(variant: str, seed: int, delta: float, finite: bool = True) -> RunResult:
+def _run(
+    variant: str,
+    seed: int,
+    delta: float,
+    finite: bool = True,
+    first: float = 1.0,
+    extra: dict[str, float] | None = None,
+) -> RunResult:
     # first/last chosen so last - first == delta; auc/seconds are aggregation fodder.
     return RunResult(
         variant=variant,
         seed=seed,
-        first=1.0,
-        last=1.0 + delta,
+        first=first,
+        last=first + delta,
         delta=delta,
         auc=2.0 + seed,
         seconds=10.0 + seed,
         finite=finite,
+        extra=extra or {},
     )
 
 
@@ -51,6 +66,33 @@ def test_improves_gate_uses_margin() -> None:
     assert gate(_run("a", 0, delta=0.6))
     assert not gate(_run("a", 0, delta=0.5))  # strictly greater
     assert not gate(_run("a", 0, delta=-1.0))
+
+
+def test_improves_ratio_gate_uses_factor() -> None:
+    gate = improves_ratio(1.05)
+    assert gate(_run("a", 0, delta=0.06, first=1.0))  # last 1.06 >= 1.05
+    assert not gate(_run("a", 0, delta=0.04, first=1.0))  # last 1.04 < 1.05
+
+
+def test_exceeds_gate_thresholds_extra_metric() -> None:
+    gate = exceeds("eval/power_gain", 0.10)
+    assert gate(_run("a", 0, delta=1.0, extra={"eval/power_gain": 0.10}))
+    assert not gate(_run("a", 0, delta=1.0, extra={"eval/power_gain": 0.09}))
+    assert not gate(_run("a", 0, delta=1.0, extra={}))  # missing metric -> nan -> fail
+
+
+def test_all_of_requires_every_gate() -> None:
+    gate = all_of(improves_ratio(1.05), exceeds("eval/power_gain", 0.10))
+    passing = _run("a", 0, delta=0.10, first=1.0, extra={"eval/power_gain": 0.20})
+    steers_but_flat = _run(
+        "a", 0, delta=0.0, first=1.0, extra={"eval/power_gain": 0.20}
+    )
+    learns_no_steer = _run(
+        "a", 0, delta=0.10, first=1.0, extra={"eval/power_gain": 0.05}
+    )
+    assert gate(passing)
+    assert not gate(steers_but_flat)
+    assert not gate(learns_no_steer)
 
 
 def test_is_finite_gate() -> None:

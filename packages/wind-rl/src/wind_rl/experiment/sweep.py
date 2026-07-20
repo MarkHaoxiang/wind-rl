@@ -45,6 +45,9 @@ class RunResult(NamedTuple):
     auc: float
     seconds: float
     finite: bool
+    #: Final logged value of each harvested ``extra_metrics`` key (for gates that
+    #: threshold a metric other than the windowed score, e.g. power gain).
+    extra: Mapping[str, float] = {}
 
 
 @dataclass(frozen=True)
@@ -91,18 +94,25 @@ def _teardown_wandb() -> None:
         pass
 
 
+def _final(history: list[dict[str, float]], metric: str) -> float:
+    values = [m[metric] for m in history if metric in m]
+    return values[-1] if values else float("nan")
+
+
 def _harvest(
     variant: str,
     seed: int,
     history: list[dict[str, float]],
     metric: str,
     seconds: float,
+    extra_metrics: Sequence[str],
 ) -> RunResult:
     evals = [m[metric] for m in history if metric in m]
     first, last, delta = windowed_delta(evals)
     auc = fmean(evals) if evals else float("nan")
     finite = bool(evals) and all(isfinite(v) for m in history for v in m.values())
-    return RunResult(variant, seed, first, last, delta, auc, seconds, finite)
+    extra = {name: _final(history, name) for name in extra_metrics}
+    return RunResult(variant, seed, first, last, delta, auc, seconds, finite, extra)
 
 
 def run_sweep(
@@ -110,6 +120,7 @@ def run_sweep(
     variants: Sequence[Variant],
     seeds: Sequence[int],
     metric: str = DEFAULT_METRIC,
+    extra_metrics: Sequence[str] = (),
 ) -> SweepResult:
     """Train every ``(variant, seed)`` and return their harvested per-run results."""
     seeded = len(seeds) > 1
@@ -126,7 +137,9 @@ def run_sweep(
             history = MappoTrainer(cfg).run()
             seconds = time.perf_counter() - start
             _teardown_wandb()
-            result = _harvest(variant.name, seed, history, metric, seconds)
+            result = _harvest(
+                variant.name, seed, history, metric, seconds, extra_metrics
+            )
             print(
                 f"[{result.variant} s{seed}] {result.first:.4f} -> {result.last:.4f} "
                 f"(delta {result.delta:+.4f}, auc {result.auc:.4f}) "
