@@ -15,7 +15,7 @@ packages/
       experiment/settings.py  # WindRlSettings (WIND_RL_* env vars)
       env/                 # WFCRL env wrapper, factory, transforms
       models/              # policy/critic and generator architectures
-      generative/           # flow-map / diffusion layout generators
+      generative/           # diffusion layout generators
       design/               # Designer abstraction, layout buffer, baseline designers
       rl/                   # MAPPO trainer
     tests/              # pytest suite, mirrors src/wind_rl/

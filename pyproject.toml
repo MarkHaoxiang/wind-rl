@@ -8,7 +8,6 @@ torch = [
 torchvision = [
   { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
-mfm = { workspace = true }
 wfcrl = { workspace = true }
 wind-rl = { workspace = true }
 
@@ -32,7 +31,7 @@ dev = [
 ]
 
 [tool.ruff]
-extend-exclude = ["packages/wfcrl-env", "packages/mfm"]
+extend-exclude = ["packages/wfcrl-env"]
 # wind_rl now lives under packages/wind-rl/src, not the repo-root `src/` ruff
 # auto-detects by default; without this, isort no longer recognizes `wind_rl`
 # as first-party and re-groups import blocks (moved files must stay
@@ -51,7 +50,7 @@ disallow_any_explicit = true
 warn_unreachable = true
 local_partial_types = true
 explicit_package_bases = true
-exclude = ["packages/wfcrl-env", "packages/mfm"]
+exclude = ["packages/wfcrl-env"]
 enable_error_code = [
     "ignore-without-code",
     "redundant-expr",
@@ -69,7 +68,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["wfcrl.*", "mfm.*", "torchrl.*", "tensordict.*", "pettingzoo.*", "wandb.*", "hydra.*", "matplotlib.*", "scipy.*", "tqdm.*", "floris.*"]
+module = ["wfcrl.*", "torchrl.*", "tensordict.*", "pettingzoo.*", "wandb.*", "hydra.*", "matplotlib.*", "scipy.*", "tqdm.*", "floris.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

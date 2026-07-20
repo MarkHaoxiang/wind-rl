@@ -4,7 +4,6 @@ from wind_rl.design.base import (
     Designer,
     DesignerConfig,
     FixedDesignerConfig,
-    FlowMapDesignerConfig,
     ManualDesignerConfig,
     RandomDesignerConfig,
 )
@@ -16,7 +15,6 @@ from wind_rl.design.buffer import (
 )
 from wind_rl.design.designers import (
     FixedDesigner,
-    FlowMapDesigner,
     ManualDesigner,
     RandomDesigner,
     create_designer,
@@ -33,8 +31,6 @@ __all__ = [
     "DesignerConfig",
     "FixedDesigner",
     "FixedDesignerConfig",
-    "FlowMapDesigner",
-    "FlowMapDesignerConfig",
     "LayoutConsumer",
     "LayoutProducer",
     "ManualDesigner",
