@@ -54,7 +54,7 @@ from wind_rl.rl.mappo import (
 )
 from wind_rl.scenario import ScenarioConfig
 from wind_rl.static import GROUP_NAME
-from wind_rl.utils import resolve_device, seed_all
+from wind_rl.utils import pinned_worker_threads, resolve_device, seed_all
 from wind_rl.viz import build_replay_html, record_episode
 
 _REWARD_KEY = (GROUP_NAME, "reward")
@@ -101,6 +101,14 @@ class TrainingConfig(Config):
     #: Debug fallback: build the batched env as an in-process ``SerialEnv``
     #: instead of a subprocess ``ParallelEnv`` (no fork; easier to trace).
     serial_envs: bool = False
+    #: Pin each ``ParallelEnv`` worker's numexpr/OpenBLAS/MKL/torch thread
+    #: pools to 1 (see :func:`wind_rl.utils.pinned_worker_threads`), so
+    #: ``n_envs`` FLORIS worker processes don't each oversubscribe every
+    #: core. Only takes effect via ``mp_start_method="spawn"``, so this also
+    #: switches the parallel start method from ``fork`` to ``spawn`` --
+    #: measured ~6x aggregate throughput at 16 workers vs unpinned ``fork``.
+    #: No effect for ``n_envs=1`` or ``serial_envs=True``.
+    pin_worker_threads: bool = True
     eval_interval: int = 1
     eval_episodes: int = 4
     checkpoint_interval: int = 1
@@ -145,6 +153,25 @@ def _layout_array(cfg: TrainingConfig) -> NDArray[np.float64] | None:
     if cfg.layout is None:
         return None
     return np.asarray(cfg.layout, dtype=np.float64)
+
+
+def _worker_env(
+    *,
+    scenario: ScenarioConfig,
+    layout: NDArray[np.float64] | None,
+    layout_consumer: object | None,
+    device: str,
+    pin_threads: bool,
+) -> TransformedEnv:
+    if pin_threads:
+        torch.set_num_threads(1)
+    return make_env(
+        "train",
+        scenario,
+        layout=layout,
+        layout_consumer=layout_consumer,  # type: ignore[arg-type]
+        device=device,
+    )
 
 
 def _rollout_metrics(data: TensorDictBase) -> dict[str, float]:
@@ -235,18 +262,32 @@ class MappoTrainer:
         # reset_policy (a live TensorDictModule) cannot cross a process boundary,
         # so the designer path in parallel mode flows through ``consumer``.
         worker = functools.partial(
-            make_env,
-            "train",
-            self.cfg.scenario,
+            _worker_env,
+            scenario=self.cfg.scenario,
             layout=_layout_array(self.cfg),
-            layout_consumer=consumer,  # type: ignore[arg-type]
+            layout_consumer=consumer,
             device=str(self.device),
+            pin_threads=self.cfg.pin_worker_threads,
         )
-        env: EnvBase = (
-            SerialEnv(n_envs, worker, device=self.device)
-            if self.cfg.serial_envs
-            else ParallelEnv(n_envs, worker, mp_start_method="fork", device=self.device)
-        )
+        env: EnvBase
+        if self.cfg.serial_envs:
+            env = SerialEnv(n_envs, worker, device=self.device)
+        else:
+            # spawn (not fork) is required for pin_worker_threads to take
+            # effect: numexpr/OpenBLAS/MKL read their thread-count env var
+            # once, at first import in the *process* -- a forked worker
+            # inherits the parent's already-imported, already-configured
+            # copies verbatim, so env vars set around a fork are a no-op.
+            mp_start_method = "spawn" if self.cfg.pin_worker_threads else "fork"
+            penv = ParallelEnv(
+                n_envs, worker, mp_start_method=mp_start_method, device=self.device
+            )
+            # Spawn workers now, inside the pin: worker startup is otherwise
+            # lazy (deferred to first reset/spec access), which could land
+            # after this method returns and the env vars are restored.
+            with pinned_worker_threads(self.cfg.pin_worker_threads):
+                penv.start()
+            env = penv
         # Distinct per-worker seeds derived from the run seed (worker i -> seed+i).
         env.set_seed(self.cfg.seed)
         return env
