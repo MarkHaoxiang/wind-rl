@@ -126,9 +126,16 @@ def run_sweep(
     seeds: Sequence[int],
     metric: str = DEFAULT_METRIC,
     extra_metrics: Sequence[str] = (),
+    seed_suffix: bool | None = None,
 ) -> SweepResult:
-    """Train every ``(variant, seed)`` and return their harvested per-run results."""
-    seeded = len(seeds) > 1
+    """Train every ``(variant, seed)`` and return their harvested per-run results.
+
+    ``seed_suffix`` forces the ``_s{seed}`` run-name/checkpoint suffix on or off;
+    ``None`` keeps the default (suffix iff a variant spans >1 seed). Set it ``True``
+    when one logical multi-seed sweep is split across processes (each running a
+    single seed) so the per-seed runs share a group without colliding on names.
+    """
+    seeded = len(seeds) > 1 if seed_suffix is None else seed_suffix
     runs: list[RunResult] = []
     for variant in variants:
         for seed in seeds:
