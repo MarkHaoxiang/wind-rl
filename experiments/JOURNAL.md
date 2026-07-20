@@ -27,3 +27,10 @@ to the run/report. See `experiments/README.md` for the contract.
   +0.158). All three FUNCTIONAL (EV>0, no NaN); no winner crowned — deltas are
   within seed noise and fixed wind under-exercises geometric bias (~12 min). See
   `0003_arch_bench/report.md`.
+- `0004_ppo_tuning` — PASS — PPO tuning-lever sweep (2x3 factorial over lr x
+  max_grad_norm + entropy, `mlp`, 3-turbine, 2 seeds/arm, online). No lever beats
+  baseline beyond seed noise: eval-AUC band 33.43–33.60 vs per-arm std 0.3–0.6;
+  entropy_eps=1e-3 is harmful (AUC 32.80). Steady-state KL is ~0.2 / clip ~10%
+  (not 0001's snapshot 0.003/<2%), so the clip is not the bottleneck. 6-turbine
+  validation ties baseline (+2.64) and gradnorm5 (+2.60). Decision: keep
+  lr=3e-4, max_grad_norm=1.0, entropy_eps=0. See `0004_ppo_tuning/report.md`.
