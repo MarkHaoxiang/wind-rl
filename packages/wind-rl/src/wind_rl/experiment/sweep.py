@@ -67,17 +67,20 @@ def _experiment_name(
     return f"{base.experiment_name}_{variant}{suffix}"
 
 
-def _run_name(variant: str, seed: int, seeded: bool, job_type: str | None) -> str:
+def _run_name(variant: str, job_type: str | None) -> str:
     # wandb's run sidebar shows name (often as the only visible column) but not
     # job_type, so bake job_type in when it differs from variant -- otherwise
     # runs from different job_types (e.g. farms) are indistinguishable at a
-    # glance. Collapse the two when equal to avoid "turb3_row1-turb3_row1-s0".
-    stem = (
+    # glance. Collapse the two when equal to avoid "turb3_row1-turb3_row1".
+    # Deliberately no seed suffix: identical names across seeds let wandb's
+    # "group by name" render a seed distribution (mean/min/max bands) instead
+    # of one line per seed. The seed stays queryable via the `seed{N}` tag and
+    # `run.config.seed`.
+    return (
         f"{job_type}-{variant}"
         if job_type is not None and job_type != variant
         else variant
     )
-    return f"{stem}-s{seed}" if seeded else stem
 
 
 def _run_tags(variant: str, seed: int, extra: Sequence[str]) -> list[str]:
@@ -88,7 +91,6 @@ def _build_config(
     base: TrainingConfig,
     variant: Variant,
     seed: int,
-    seeded: bool,
     name: str,
     group: str,
     job_type: str,
@@ -103,7 +105,7 @@ def _build_config(
     )
     labels = cfg.logging.model_copy(
         update={
-            "run_name": _run_name(variant.name, seed, seeded, job_type),
+            "run_name": _run_name(variant.name, job_type),
             "group": group,
             "job_type": job_type,
             "tags": _run_tags(variant.name, seed, tags),
@@ -148,10 +150,13 @@ def run_sweep(
 ) -> SweepResult:
     """Train every ``(variant, seed)`` and return their harvested per-run results.
 
-    ``seed_suffix`` forces the ``_s{seed}`` run-name/checkpoint suffix on or off;
-    ``None`` keeps the default (suffix iff a variant spans >1 seed). Set it ``True``
-    when one logical multi-seed sweep is split across processes (each running a
-    single seed) so the per-seed runs share a group without colliding on names.
+    ``seed_suffix`` forces the ``_s{seed}`` *local* experiment-name/checkpoint-dir
+    suffix on or off; ``None`` keeps the default (suffix iff a variant spans >1
+    seed in this process). Set it ``True`` when one logical multi-seed sweep is
+    split across concurrent single-seed processes, so each still gets its own
+    checkpoint directory instead of colliding on the plain name. This is purely
+    a local-path concern -- it has no effect on the wandb run name (see
+    ``_run_name``), which never varies by seed.
 
     ``group``/``job_type``/``tags`` set the wandb hierarchy for every run in this
     sweep: ``group`` defaults to ``base.experiment_name`` (one framework/scenario
@@ -172,7 +177,6 @@ def run_sweep(
                 base,
                 variant,
                 seed,
-                seeded,
                 name,
                 resolved_group,
                 resolved_job_type,

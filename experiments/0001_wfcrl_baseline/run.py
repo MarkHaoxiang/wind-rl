@@ -79,8 +79,10 @@ class ExperimentConfig(Config):
     #: Per-variant because the achievable gain is farm-specific -- calibrated from
     #: the paper's own converged power, not tuned to pass (see report.md).
     power_gain_threshold: float = 0.10
-    #: Force the ``_s{seed}`` suffix even for a single-seed process, so seeds of
-    #: one sweep split across concurrent processes share a group without colliding.
+    #: Force the ``_s{seed}`` local experiment-name/checkpoint-dir suffix even for
+    #: a single-seed process, so seeds of one sweep split across concurrent
+    #: processes don't collide on checkpoint directory. No effect on the wandb
+    #: run name, which never varies by seed (see ``wind_rl.experiment.sweep``).
     always_seed_suffix: bool = False
 
     def resolved_base(self) -> TrainingConfig:
