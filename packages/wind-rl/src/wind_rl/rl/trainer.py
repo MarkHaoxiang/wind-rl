@@ -52,6 +52,7 @@ from wind_rl.rl.mappo import (
     build_loss_module,
     build_optimiser,
 )
+from wind_rl.rl.wind_rose import WindRose, WindRoseEvalConfig
 from wind_rl.scenario import ScenarioConfig
 from wind_rl.static import GROUP_NAME
 from wind_rl.utils import pinned_worker_threads, resolve_device, seed_all
@@ -126,6 +127,25 @@ class TrainingConfig(Config):
     model: ModelConfig = MlpModelConfig()
     ppo: PPOConfig = PPOConfig()
     logging: LoggingConfig = LoggingConfig()
+    #: WFCRL Scenario II: when set, eval runs one deterministic episode per rose
+    #: bin (wind fixed to the bin representative) and reports the
+    #: frequency-weighted score/power gain instead of the single-wind eval.
+    #: Requires ``scenario.fixed_wind_direction`` unset so training samples wind
+    #: freely per episode -- the two would otherwise contradict.
+    wind_rose: WindRoseEvalConfig | None = None
+
+    @model_validator(mode="after")
+    def _wind_rose_requires_sampled_training_wind(self) -> TrainingConfig:
+        if (
+            self.wind_rose is not None
+            and self.scenario.fixed_wind_direction is not None
+        ):
+            raise ValueError(
+                "wind_rose eval requires scenario.fixed_wind_direction unset so "
+                "training samples wind per episode (Scenario II); a fixed training "
+                "wind with a rose eval mixes the two scenarios"
+            )
+        return self
 
     @model_validator(mode="after")
     def _layout_xor_designer(self) -> TrainingConfig:
@@ -356,6 +376,74 @@ class MappoTrainer:
         env.close()
         return float(np.mean(powers))
 
+    def _greedy_rose_baseline_power(self, rose: WindRose) -> float:
+        """Rose-weighted mean farm power (MW) under zero-yaw control.
+
+        One zero-yaw episode per rose bin (wind fixed to the bin representative),
+        weighted by the bin frequency. Computed once at startup so the rose eval
+        power gain stays readable against the do-nothing baseline per bin.
+        """
+        env = self._make_env("eval")
+        wrapper = env.base_env
+        max_steps = self.cfg.scenario.max_steps
+        action_key = env.action_key
+        zero_action = env.full_action_spec[action_key].zero()
+        powers = np.zeros_like(rose.freq)
+        for i, j, wd, ws in rose.bins():
+            wrapper.set_wind_override((wd, ws))
+            bin_powers: list[float] = []
+            td = env.reset()
+            for _ in range(max_steps):
+                td.set(action_key, zero_action)
+                td = env.step(td)
+                bin_powers.append(float(td["next", *_POWER_KEY].mean()))
+                if bool(td["next", *_DONE_KEY].any()):
+                    break
+                td = step_mdp(td)
+            powers[i, j] = float(np.mean(bin_powers))
+        env.close()
+        return rose.weighted(powers)
+
+    def _eval_wind_rose(
+        self, policy: torch.nn.Module, rose: WindRose, record_replay: bool
+    ) -> tuple[_EvalResult, dict[str, float]]:
+        """Deterministic rose eval: one episode per bin, frequency-weighted.
+
+        Returns an :class:`_EvalResult` whose ``reward_mean``/``power_mean`` are
+        the rose-weighted score and power, plus a dict of per-bin scores keyed
+        ``eval/rose/score_d{i}_s{j}`` for the log.
+        """
+        env = self._make_env("eval")
+        wrapper = env.base_env
+        max_steps = self.cfg.scenario.max_steps
+        rewards = np.zeros_like(rose.freq)
+        powers = np.zeros_like(rose.freq)
+        per_bin: dict[str, float] = {}
+        replay_html: str | None = None
+        last = list(rose.bins())[-1][:2]
+        with torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
+            for i, j, wd, ws in rose.bins():
+                wrapper.set_wind_override((wd, ws))
+                rollout = env.rollout(max_steps, policy, break_when_any_done=True)
+                reward = float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean())
+                rewards[i, j] = reward
+                powers[i, j] = float(rollout["next", *_POWER_KEY].mean())
+                per_bin[f"eval/rose/score_d{i}_s{j}"] = reward
+                if record_replay and (i, j) == last:
+                    replay_html = _replay_html(env, policy)
+        render = _render_eval(env)
+        env.close()
+        return (
+            _EvalResult(
+                rose.weighted(rewards),
+                float(rewards.std()),
+                rose.weighted(powers),
+                render,
+                replay_html,
+            ),
+            per_bin,
+        )
+
     def _save_checkpoint(
         self, policy: torch.nn.Module, critic: torch.nn.Module, tag: str
     ) -> Path:
@@ -413,7 +501,12 @@ class MappoTrainer:
             batch_size=minibatch_size,
         )
 
-        baseline_power = self._greedy_baseline_power()
+        rose = cfg.wind_rose.to_rose() if cfg.wind_rose is not None else None
+        baseline_power = (
+            self._greedy_rose_baseline_power(rose)
+            if rose is not None
+            else self._greedy_baseline_power()
+        )
 
         logger = RunLogger(cfg, self.settings)
         history: list[dict[str, float]] = []
@@ -503,7 +596,13 @@ class MappoTrainer:
                 eval_s = 0.0
                 if iteration % cfg.eval_interval == 0:
                     t0 = time.perf_counter()
-                    result = self._eval(policy, cfg.logging.replay and logger.enabled)
+                    replay_now = cfg.logging.replay and logger.enabled
+                    if rose is not None:
+                        result, per_bin = self._eval_wind_rose(policy, rose, replay_now)
+                        metrics.update(per_bin)
+                        metrics["eval/rose/greedy_power_mw"] = baseline_power
+                    else:
+                        result = self._eval(policy, replay_now)
                     eval_s = time.perf_counter() - t0
                     metrics["eval/episode_reward_mean"] = result.reward_mean
                     metrics["eval/episode_reward_std"] = result.reward_std
