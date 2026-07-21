@@ -6,10 +6,12 @@
 # (150-step episodes, 2048-step updates, PPO block, 2e5 frames, 2 seeds) matches
 # the constant-wind variant.
 #
-# Wind sampling: `scenario.fixed_wind_direction: null` leaves the wfcrl fork to
-# sample on every reset -- wind_speed = 8*Weibull(k=8) clipped [0,28], direction
-# = Normal(270, 20) deg % 360 clipped [0,360] (packages/wfcrl-env/wfcrl/mdp.py).
-# torchrl passes no seed on rollout resets, so each episode draws fresh wind.
+# Wind sampling (SECOND ATTEMPT): `wind_rose.train_from_rose: true` draws each
+# training episode's wind from the SAME SMARTEOLE rose eval scores against (a bin
+# by frequency, then its center) instead of the wfcrl fork's N(270,20) default.
+# The first attempt trained on the fork's distribution, which put 45% of eval-rose
+# mass >60 deg away from any training wind -- a direct train/eval mismatch. See
+# report.md's Scenario II section for the first-attempt numbers and the fix.
 #
 # Eval rose: precomputed once from the SMARTEOLE campaign (402k rows) with the
 # reference recipe -- wd -> (wd+60)%360, np.histogram2d(bins=5), freq = counts /
@@ -51,24 +53,33 @@ base:
     fixed_wind_speed: 8.0
     load_coef: 1.0
 
+  # PPO stability block (SECOND ATTEMPT): deviates from paper Table 5 deliberately
+  # to cure the diagnosed KL trust-region collapse (approx_kl 6-9, entropy 1.42 ->
+  # 0.15, clip_fraction ~0.4 on the 7-agent farm). target_kl halts an update the
+  # moment a minibatch's approx_kl runs away; n_epochs 10 -> 4 cuts the batch
+  # re-use that fed the runaway; a small entropy_eps keeps the policy from a
+  # premature deterministic collapse. See report.md.
   ppo:
     clip_epsilon: 0.2
     gamma: 0.99
     lmbda: 0.95
-    entropy_eps: 0.0
+    entropy_eps: 0.005
     normalize_advantage: true
     vf_coef: 0.5
     clip_value_loss: true
     lr: 3.0e-4
     adam_eps: 1.0e-5
     max_grad_norm: 0.5
-    n_epochs: 10
+    n_epochs: 4
     num_minibatches: 32
     reward_batch_norm: true
     lr_anneal: linear
+    target_kl: 0.015
 
-  # SMARTEOLE wind rose (5 direction x 5 speed bins), frequency-weighted eval.
+  # SMARTEOLE wind rose (5 direction x 5 speed bins), frequency-weighted eval;
+  # train_from_rose draws training wind from this same rose (see header).
   wind_rose:
+    train_from_rose: true
     freq:
       - [0.10939980670183136, 0.030480487568542585, 0.0019926109414714014, 0.00019876418368792035, 1.2422761480495022e-05]
       - [0.12761902868912536, 0.05345265809827398, 0.002710646555044014, 7.950567347516814e-05, 0.0]

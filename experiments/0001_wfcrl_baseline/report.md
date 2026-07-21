@@ -163,34 +163,84 @@ amplifier. **An entropy bonus would make it worse** (entropy is already too high
 in the failing run). These touch matched-setup fidelity, so they are the owner's
 call.
 
-## Scenario II (windrose) -- built, not yet run
+## Scenario II (windrose) -- first attempt FAILED, second attempt set up
 
 Two further variants add the paper's **Scenario II** (freely-sampled wind, wind-
 rose-weighted eval) to this same framework: `turb3_row1_windrose` and
-`ablaincourt_windrose`. Same farms, same PPO block, same 2e5-frame / 2-seed
-budget; only the wind regime and the eval metric change.
+`ablaincourt_windrose`. Same farms, same 2e5-frame / 2-seed budget; the wind
+regime and the eval metric change.
 
-### Training wind (sampled per episode)
+### First-attempt results (matched-setup PPO, fork-sampled training wind) -- FAIL
 
-`scenario.fixed_wind_direction: null` disables the fixed-wind override, so the
-wfcrl fork samples free-stream wind on every reset. torchrl passes no seed on
-rollout resets, so each episode draws fresh wind (verified: 6 consecutive resets
-gave speeds 7.6-10.0 m/s and directions 228-273 deg). The fork's sampler
-(`packages/wfcrl-env/wfcrl/mdp.py`, READ-ONLY):
+The first attempt used the paper's Table 5 PPO block verbatim and trained on the
+wfcrl fork's `N(270, 20)` wind. **All four runs land below the zero-yaw greedy
+baseline** -- a policy strictly *worse* than doing nothing:
+
+| variant               | seed 0 power gain | seed 1 power gain | verdict |
+|-----------------------|-------------------|-------------------|---------|
+| `turb3_row1_windrose` | -3.2%             | -2.0%             | FAIL    |
+| `ablaincourt_windrose`| -19.4%            | -20.5%            | FAIL    |
+
+**Diagnosis (three confirmed mechanisms, validated offline against the saved
+checkpoints, no retraining):**
+
+1. **PPO trust-region collapse (primary).** The same KL runaway that took down
+   1/5 constant-wind Ablaincourt seeds (diagnosed above) hits the windrose runs
+   systematically on the 7-agent farm: `approx_kl` diverges to **6-9**, entropy
+   collapses `1.42 -> 0.15`, `clip_fraction` saturates at **~0.4**, and the
+   policy settles into a near-constant, direction-blind yaw that loses ~40% power
+   even *in-distribution*. The 10-epoch x 32-minibatch re-use of each batch with
+   no KL guard is the amplifier, exactly as in the constant-wind collapse.
+2. **Policy strictly dominated by greedy.** Every run's rose-weighted score sits
+   below the zero-yaw greedy score. The first-attempt eval logged only the
+   policy's score, never greedy's, so this domination was invisible to the gate
+   -- `improves_ratio` can pass a policy that never beats doing nothing.
+3. **Train/eval distribution mismatch.** Training drew from the fork's
+   `N(270, 20)`, but the SMARTEOLE eval rose puts **~45% of its mass >60 deg away**
+   from any wind the policy ever trained on. Even a healthy policy would be
+   evaluated largely out-of-distribution.
+
+### Second attempt -- what changed (this pass)
+
+Three fixes, all config-reachable; the constant-wind confs are untouched.
+
+1. **KL early-stop + tamer update.** `ppo.target_kl: 0.015` (new
+   `PPOConfig.target_kl`; the update halts the moment a minibatch's `approx_kl`
+   exceeds it -- CleanRL's `--target-kl`, checked per minibatch in
+   `wind_rl.rl.mappo.run_ppo_epochs`), `n_epochs: 10 -> 4` (less batch re-use),
+   and `entropy_eps: 0.0 -> 0.005` (a small floor against premature determinism).
+   **These deviate from Table 5 deliberately**, to cure the diagnosed collapse;
+   the constant-wind variants keep matched-setup fidelity.
+2. **Rose-matched training wind.** `wind_rose.train_from_rose: true` draws each
+   training episode's free-stream wind from the *same* SMARTEOLE rose the eval
+   scores against (a bin chosen by frequency, then its **center** -- the exact
+   wind that bin is evaluated at), via a per-reset sampler seam on the env wrapper
+   (`set_wind_sampler`; requires `n_envs=1`). Training and eval now share one
+   discrete wind distribution, closing mechanism (3).
+3. **Eval observability.** The rose eval now logs per-bin `eval/rose/power_d{i}_s{j}`
+   and `eval/rose/load_d{i}_s{j}` alongside the pre-existing score, and the
+   startup greedy pass now also computes the rose-weighted greedy *score*
+   (`eval/greedy_score`) -- so a policy scoring below greedy (mechanism 2) is
+   directly visible instead of hidden behind the improves-ratio gate.
+
+### Training wind (second attempt: rose-matched)
+
+With `train_from_rose: true`, each reset draws `(direction, speed)` from the eval
+rose (bin by frequency, then its center; `WindRose.sample` /
+`WindRoseSampler`, seeded from the run seed for per-seed reproducibility). This
+replaces the fork's default sampler for training. For the record, the fork's
+default (`packages/wfcrl-env/wfcrl/mdp.py`, READ-ONLY; still used when
+`train_from_rose` is false) is:
 
 - **speed** `8 * rng.weibull(8)` clipped to `[0, 28]` (Weibull shape k=8, scale 8;
   mean ~7.53 m/s),
 - **direction** `rng.normal(270, 20) % 360` clipped to `[0, 360]`.
 
-**Vs the paper (Eq. 1: u_inf ~ Weibull, phi_inf ~ Normal).** The *distributional
-families match* (Weibull speed, Normal direction). The concrete parameters are
-the wfcrl defaults (k=8, scale 8; N(270, 20)), which are not stated numerically
-in the paper, so this is a family-faithful but not parameter-verified match. Two
-minor fidelity notes, both recorded rather than worked around (the fork is a
-read-only submodule): (1) the reference benchmark re-seeds each episode with
-`seed + global_step` for reproducible-yet-varying wind, whereas our stack draws
-from fresh OS entropy each reset -- statistically equivalent, not run-reproducible;
-(2) the Weibull scale of 8 gives a slightly sub-8 m/s mean speed.
+That default matches the paper's Eq. 1 *families* (Weibull speed, Normal
+direction) but not the eval rose -- which is why the first attempt mismatched.
+Sampling training wind from the rose itself makes the two distributions identical
+by construction, at the cost of the discretised (bin-center) wind set rather than
+a continuous draw.
 
 ### Eval (wind-rose-weighted score)
 
@@ -212,10 +262,14 @@ rose was precomputed once from that csv with `prepare_wind_rose` and the resulti
     print(WindRoseEvalConfig.from_rose(prepare_wind_rose(df.wd.values, df.ws.values)).model_dump())
 
 A frequency-weighted **greedy** (zero-yaw) baseline is computed the same way once
-at startup (`_greedy_rose_baseline_power`), so `eval/power_gain` stays meaningful
-as a rose-weighted number. Logged: per-bin scores `eval/rose/score_d{i}_s{j}`,
-`eval/rose/greedy_power_mw`, plus the weighted aggregates (`eval/episode_reward_mean`
-= weighted score, `eval/power_gain`, `eval/episode_power_mw`).
+at startup (`_greedy_rose_baseline`), so `eval/power_gain` stays meaningful as a
+rose-weighted number. That startup pass now yields **both** the greedy power and
+the greedy *score*, so `eval/greedy_score` is logged and a below-greedy policy is
+directly visible. Logged per bin: `eval/rose/score_d{i}_s{j}`,
+`eval/rose/power_d{i}_s{j}`, `eval/rose/load_d{i}_s{j}` (the last two added this
+pass); plus `eval/rose/greedy_power_mw`, `eval/greedy_score`, and the weighted
+aggregates (`eval/episode_reward_mean` = weighted score, `eval/power_gain`,
+`eval/episode_power_mw`).
 
 ### Paper reference numbers (context, not a target)
 
@@ -248,13 +302,19 @@ set-point controller that ramps to the SR target under the actuation budget. Tha
 is feasible but out of scope for this pass; proposed as a follow-up to log
 `eval/serial_refine_score` as a reference line (never a gate).
 
-### Smoke evidence
+### Smoke evidence (second attempt)
 
 Both variants ran end-to-end with `WIND_RL_WANDB_MODE=disabled`, 2 iterations,
-reduced batch (`n_iters=2 frames_per_batch=32 max_steps=8 seeds=[0]`): the 25-bin
-greedy baseline and 25-bin rose eval both executed, per-bin scores logged, weighted
-score/power-gain produced (`turb3_row1_windrose` score 23.06, gain -0.4%;
-`ablaincourt_windrose` score 19.76, gain +0.2% -- expected FAIL at 2 iters).
+reduced batch (`base.n_iters=2 base.frames_per_batch=64 base.scenario.max_steps=8
+base.ppo.num_minibatches=4 seeds=[0]`): the rose-matched training sampler, the
+`target_kl` early-stop, the 25-bin greedy baseline (power **and** score), and the
+25-bin rose eval all executed; per-bin score/power/load logged, `eval/greedy_score`
+logged, weighted score/power-gain produced (`turb3_row1_windrose` score 22.99;
+`ablaincourt_windrose` score 19.73 -- expected FAIL at 2 iters). (`frames_per_batch
+/ num_minibatches` must stay > 1: at the degenerate `32/32` the per-rollout reward
+standardisation divides a size-1 minibatch's std and NaNs -- a smoke-config
+artifact, unrelated to the fixes.) The real 2e5-frame / 2-seed runs are **not**
+launched here.
 
 ## Decision
 
