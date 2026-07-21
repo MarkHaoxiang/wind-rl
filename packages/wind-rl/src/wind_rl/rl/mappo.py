@@ -37,11 +37,12 @@ class PPOConfig(Config):
     max_grad_norm: float = 1.0
     n_epochs: int = 4
     num_minibatches: int = 4
-    #: KL trust-region guard (CleanRL's ``--target-kl``). When set, the
-    #: ``n_epochs x num_minibatches`` update halts as soon as a minibatch's
-    #: ``approx_kl`` exceeds this, so a single runaway batch cannot keep pushing
-    #: the policy across the whole update. ``None`` disables the guard (the paper's
-    #: Table 5 default). See :func:`wind_rl.rl.trainer._ppo_epochs`.
+    #: KL trust-region guard (CleanRL's ``--target-kl``). When set, each epoch
+    #: runs to completion (every minibatch), then that epoch's *mean*
+    #: ``approx_kl`` is compared against this; exceeding it skips the remaining
+    #: epochs, so every update still performs at least one full pass over the
+    #: batch. ``None`` disables the guard (the paper's Table 5 default). See
+    #: :func:`wind_rl.rl.mappo.run_ppo_epochs`.
     target_kl: float | None = None
     #: Standardise each rollout's rewards (over the whole collected batch) before
     #: GAE -- recomputed fresh per update, not a running normaliser.
@@ -103,16 +104,19 @@ def run_ppo_epochs(
 ) -> tuple[list[float], dict[str, list[float]]]:
     """Run PPO's ``n_epochs x num_minibatches`` update over the sampled batch.
 
-    When ``cfg.target_kl`` is set, the whole update halts (both loops) the moment a
-    minibatch's ``approx_kl`` exceeds it -- CleanRL's ``--target-kl`` trust-region
-    guard, checked *per minibatch* (finer than CleanRL's per-epoch check) so a
-    single runaway batch cannot keep pushing the policy across the remaining
-    epochs. ``optim/kl_early_stop`` records whether the guard fired this update.
+    When ``cfg.target_kl`` is set, each epoch completes in full (every
+    minibatch), then that epoch's *mean* ``approx_kl`` is compared against it --
+    CleanRL's ``--target-kl`` trust-region guard, checked *per epoch*: exceeding
+    it skips the remaining epochs, but every update still performs at least one
+    full pass over the batch (a per-minibatch check can halt after a single
+    minibatch, throttling the update to a handful of gradient steps).
+    ``optim/epochs_completed`` records how many epochs actually ran this update.
     """
     grad_norms: list[float] = []
     diagnostics: dict[str, list[float]] = {}
-    stopped = False
+    epochs_completed = 0
     for _ in range(cfg.n_epochs):
+        epoch_kls: list[float] = []
         for _ in range(cfg.num_minibatches):
             minibatch = replay_buffer.sample()
             loss_vals = loss_module(minibatch)
@@ -126,16 +130,16 @@ def run_ppo_epochs(
             optimiser.step()
             optimiser.zero_grad()
             _accumulate_diagnostics(diagnostics, loss_vals, loss_value)
-            if (
-                cfg.target_kl is not None
-                and "kl_approx" in loss_vals.keys()  # noqa: SIM118 - TensorDict keys view
-                and float(loss_vals["kl_approx"].mean()) > cfg.target_kl
-            ):
-                stopped = True
-                break
-        if stopped:
+            if "kl_approx" in loss_vals.keys():  # noqa: SIM118 - TensorDict keys view
+                epoch_kls.append(float(loss_vals["kl_approx"].mean()))
+        epochs_completed += 1
+        if (
+            cfg.target_kl is not None
+            and epoch_kls
+            and (sum(epoch_kls) / len(epoch_kls)) > cfg.target_kl
+        ):
             break
-    diagnostics.setdefault("optim/kl_early_stop", []).append(1.0 if stopped else 0.0)
+    diagnostics.setdefault("optim/epochs_completed", []).append(float(epochs_completed))
     return grad_norms, diagnostics
 
 

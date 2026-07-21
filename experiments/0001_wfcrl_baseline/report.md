@@ -163,12 +163,13 @@ amplifier. **An entropy bonus would make it worse** (entropy is already too high
 in the failing run). These touch matched-setup fidelity, so they are the owner's
 call.
 
-## Scenario II (windrose) -- first attempt FAILED, second attempt set up
+## Scenario II (windrose) -- first attempt FAILED, second attempt under-trained, third attempt set up
 
 Two further variants add the paper's **Scenario II** (freely-sampled wind, wind-
 rose-weighted eval) to this same framework: `turb3_row1_windrose` and
-`ablaincourt_windrose`. Same farms, same 2e5-frame / 2-seed budget; the wind
-regime and the eval metric change.
+`ablaincourt_windrose`. Same farms, same 2-seed count; the wind regime and the
+eval metric change. Both variants used a 2e5-frame budget through the first two
+attempts; the third attempt bumps this to the paper's official numbers (below).
 
 ### First-attempt results (matched-setup PPO, fork-sampled training wind) -- FAIL
 
@@ -210,7 +211,12 @@ Three fixes, all config-reachable; the constant-wind confs are untouched.
    `wind_rl.rl.mappo.run_ppo_epochs`), `n_epochs: 10 -> 4` (less batch re-use),
    and `entropy_eps: 0.0 -> 0.005` (a small floor against premature determinism).
    **These deviate from Table 5 deliberately**, to cure the diagnosed collapse;
-   the constant-wind variants keep matched-setup fidelity.
+   the constant-wind variants keep matched-setup fidelity. **Result (see below):**
+   the per-minibatch check tripped on effectively every iteration across all four
+   runs, throttling each update to a handful of gradient steps -- curves were
+   still rising, decelerating, at the 2e5-frame cutoff. Third attempt switches to
+   a per-epoch check and bumps both windrose budgets to the paper's official
+   numbers.
 2. **Rose-matched training wind.** `wind_rose.train_from_rose: true` draws each
    training episode's free-stream wind from the *same* SMARTEOLE rose the eval
    scores against (a bin chosen by frequency, then its **center** -- the exact
@@ -315,6 +321,41 @@ logged, weighted score/power-gain produced (`turb3_row1_windrose` score 22.99;
 standardisation divides a size-1 minibatch's std and NaNs -- a smoke-config
 artifact, unrelated to the fixes.) The real 2e5-frame / 2-seed runs are **not**
 launched here.
+
+### Second-attempt results (rose-matched training, per-minibatch KL guard) -- stable but under-trained
+
+The full 2e5-frame / 2-seed runs for both windrose variants completed (four runs
+total). No repeat of the seed-0-style KL runaway: the guard did its job. But it
+did *too much* of its job -- `optim/kl_early_stop` (the per-minibatch check
+firing at least once that update) reads **1.00 across all four runs**, i.e.
+essentially every update halted after only a few minibatches instead of the
+intended `n_epochs=4 x num_minibatches=32 = 128` gradient steps. The runs are
+stable but massively under-trained: power-gain curves are still **rising**,
+though decelerating, at the 2e5-frame cutoff -- the throttled updates left too
+little signal per frame to converge inside the reduced budget.
+
+### Third attempt -- per-epoch KL + official budgets
+
+Two further changes, both config/code-reachable; the constant-wind confs remain
+untouched.
+
+1. **Per-epoch KL semantics** (CleanRL's actual recipe, not the finer
+   per-minibatch check the second attempt used). `wind_rl.rl.mappo.run_ppo_epochs`
+   now completes each epoch in full over all minibatches, then compares that
+   epoch's *mean* `approx_kl` against `target_kl`; only exceeding it skips the
+   *remaining* epochs. Every update therefore performs at least one full epoch
+   (`num_minibatches` gradient steps) before the guard can act, instead of
+   stopping after as few as one minibatch. The diagnostic changes from the
+   binary `optim/kl_early_stop` to `optim/epochs_completed` (the number of
+   epochs actually run that update) -- more informative for tuning than a
+   fired/not-fired flag.
+2. **Official training budgets.** `ablaincourt_windrose`'s total frames go
+   `2e5 -> 1e6` (`n_iters: 98 -> 489`), matching the paper's official
+   Ablaincourt training budget; `turb3_row1_windrose`'s go
+   `2e5 -> 4e5` (`n_iters: 98 -> 195`). Both were already under-powered at 2e5
+   even before the per-minibatch guard throttled them further.
+
+The real 1e6 / 4e5-frame runs are **not** launched by this pass.
 
 ## Decision
 

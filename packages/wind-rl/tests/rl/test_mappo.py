@@ -58,32 +58,33 @@ def _run(loss: _FakeLoss, cfg: PPOConfig) -> dict[str, list[float]]:
     return diagnostics
 
 
-def test_target_kl_halts_update_when_kl_runs_away() -> None:
-    # 3rd minibatch of epoch 1 trips the 0.015 guard, before epoch 2 begins.
+def test_target_kl_halts_after_epoch_boundary_not_mid_epoch() -> None:
+    # Epoch 1's mean approx_kl ((0.001+0.001+0.5)/3 ~= 0.167) trips the 0.015
+    # guard, but only *after* all 3 of its minibatches ran; epoch 2 is skipped.
     loss = _FakeLoss([0.001, 0.001, 0.5, 0.001, 0.001, 0.001])
     diagnostics = _run(
         loss, PPOConfig(n_epochs=2, num_minibatches=3, target_kl=0.015, entropy_eps=0.0)
     )
     assert loss.calls == 3
-    assert diagnostics["optim/kl_early_stop"] == [1.0]
+    assert diagnostics["optim/epochs_completed"] == [1.0]
 
 
-def test_no_early_stop_runs_every_minibatch() -> None:
+def test_no_early_stop_runs_every_epoch() -> None:
     loss = _FakeLoss([0.001])
     diagnostics = _run(
         loss, PPOConfig(n_epochs=2, num_minibatches=3, target_kl=0.015, entropy_eps=0.0)
     )
     assert loss.calls == 6
-    assert diagnostics["optim/kl_early_stop"] == [0.0]
+    assert diagnostics["optim/epochs_completed"] == [2.0]
 
 
 def test_target_kl_none_disables_the_guard() -> None:
     loss = _FakeLoss([10.0])
     diagnostics = _run(
-        loss, PPOConfig(n_epochs=1, num_minibatches=4, target_kl=None, entropy_eps=0.0)
+        loss, PPOConfig(n_epochs=3, num_minibatches=4, target_kl=None, entropy_eps=0.0)
     )
-    assert loss.calls == 4
-    assert diagnostics["optim/kl_early_stop"] == [0.0]
+    assert loss.calls == 12
+    assert diagnostics["optim/epochs_completed"] == [3.0]
 
 
 def test_batch_normalise_reward_zero_mean_unit_population_std() -> None:
