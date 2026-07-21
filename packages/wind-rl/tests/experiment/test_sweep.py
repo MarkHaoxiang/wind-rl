@@ -22,8 +22,19 @@ from wind_rl.experiment.verdict import (
 
 
 def test_run_name_adds_seed_suffix_only_when_seeded() -> None:
-    assert _run_name("mlp", 0, seeded=True) == "mlp-s0"
-    assert _run_name("mlp", 0, seeded=False) == "mlp"
+    assert _run_name("mlp", 0, seeded=True, job_type=None) == "mlp-s0"
+    assert _run_name("mlp", 0, seeded=False, job_type=None) == "mlp"
+
+
+def test_run_name_bakes_in_job_type_when_it_differs_from_variant() -> None:
+    assert (
+        _run_name("mlp", 0, seeded=True, job_type="turb3_row1") == "turb3_row1-mlp-s0"
+    )
+    assert _run_name("mlp", 0, seeded=False, job_type="turb3_row1") == "turb3_row1-mlp"
+
+
+def test_run_name_collapses_duplicate_job_type_and_variant() -> None:
+    assert _run_name("mlp", 0, seeded=True, job_type="mlp") == "mlp-s0"
 
 
 def test_run_tags_combines_extra_variant_and_seed() -> None:

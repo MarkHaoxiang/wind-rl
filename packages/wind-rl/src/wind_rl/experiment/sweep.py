@@ -67,10 +67,17 @@ def _experiment_name(
     return f"{base.experiment_name}_{variant}{suffix}"
 
 
-def _run_name(variant: str, seed: int, seeded: bool) -> str:
-    # Short wandb display name -- group/job_type already carry the framework and
-    # variant facets, so this only needs to disambiguate seeds within a variant.
-    return f"{variant}-s{seed}" if seeded else variant
+def _run_name(variant: str, seed: int, seeded: bool, job_type: str | None) -> str:
+    # wandb's run sidebar shows name (often as the only visible column) but not
+    # job_type, so bake job_type in when it differs from variant -- otherwise
+    # runs from different job_types (e.g. farms) are indistinguishable at a
+    # glance. Collapse the two when equal to avoid "turb3_row1-turb3_row1-s0".
+    stem = (
+        f"{job_type}-{variant}"
+        if job_type is not None and job_type != variant
+        else variant
+    )
+    return f"{stem}-s{seed}" if seeded else stem
 
 
 def _run_tags(variant: str, seed: int, extra: Sequence[str]) -> list[str]:
@@ -96,7 +103,7 @@ def _build_config(
     )
     labels = cfg.logging.model_copy(
         update={
-            "run_name": _run_name(variant.name, seed, seeded),
+            "run_name": _run_name(variant.name, seed, seeded, job_type),
             "group": group,
             "job_type": job_type,
             "tags": _run_tags(variant.name, seed, tags),
