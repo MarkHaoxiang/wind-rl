@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from wind_rl.experiment.sweep import RunResult, SweepResult
+from wind_rl.experiment.sweep import RunResult, SweepResult, _run_name, _run_tags
 from wind_rl.experiment.table import format_table, summarize
 from wind_rl.experiment.verdict import (
     all_of,
@@ -19,6 +19,16 @@ from wind_rl.experiment.verdict import (
     is_finite,
     windowed_delta,
 )
+
+
+def test_run_name_adds_seed_suffix_only_when_seeded() -> None:
+    assert _run_name("mlp", 0, seeded=True) == "mlp-s0"
+    assert _run_name("mlp", 0, seeded=False) == "mlp"
+
+
+def test_run_tags_combines_extra_variant_and_seed() -> None:
+    assert _run_tags("mlp", 1, ["ablaincourt"]) == ["ablaincourt", "mlp", "seed1"]
+    assert _run_tags("mlp", 1, []) == ["mlp", "seed1"]
 
 
 def _run(

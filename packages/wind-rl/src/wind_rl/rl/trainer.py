@@ -18,7 +18,7 @@ from typing import NamedTuple
 import numpy as np
 import torch
 from numpy.typing import NDArray
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from tensordict import TensorDictBase
 from torch.nn.utils import clip_grad_norm_
 from torchrl.collectors import SyncDataCollector
@@ -84,6 +84,14 @@ class LoggingConfig(Config):
     #: ``checkpoint_interval=1``/short smoke runs, but chatty for long runs
     #: with frequent checkpointing; raise it alongside ``checkpoint_interval``.
     checkpoint_upload_interval: int | None = 1
+    #: wandb run name; falls back to ``experiment_name`` when unset.
+    run_name: str | None = None
+    #: wandb group -- collapses one experiment framework's runs together in the UI.
+    group: str | None = None
+    #: wandb job_type -- the within-group facet a sweep compares (e.g. variant name).
+    job_type: str | None = None
+    #: Orthogonal facets for wandb filtering (architecture, scenario, seed, ...).
+    tags: list[str] = Field(default_factory=list)
 
 
 class TrainingConfig(Config):

@@ -95,7 +95,10 @@ class RunLogger:
         config["git_commit"] = git_commit()
         self._run = wandb.init(
             project=cfg.logging.project,
-            name=cfg.experiment_name,
+            name=cfg.logging.run_name or cfg.experiment_name,
+            group=cfg.logging.group,
+            job_type=cfg.logging.job_type,
+            tags=cfg.logging.tags,
             mode=settings.wandb_mode,
             config=config,
         )

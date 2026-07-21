@@ -11,7 +11,6 @@ gating live in :mod:`~wind_rl.experiment.table` and
 
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -68,33 +67,42 @@ def _experiment_name(
     return f"{base.experiment_name}_{variant}{suffix}"
 
 
+def _run_name(variant: str, seed: int, seeded: bool) -> str:
+    # Short wandb display name -- group/job_type already carry the framework and
+    # variant facets, so this only needs to disambiguate seeds within a variant.
+    return f"{variant}-s{seed}" if seeded else variant
+
+
+def _run_tags(variant: str, seed: int, extra: Sequence[str]) -> list[str]:
+    return [*extra, variant, f"seed{seed}"]
+
+
 def _build_config(
-    base: TrainingConfig, variant: Variant, seed: int, name: str
+    base: TrainingConfig,
+    variant: Variant,
+    seed: int,
+    seeded: bool,
+    name: str,
+    group: str,
+    job_type: str,
+    tags: Sequence[str],
 ) -> TrainingConfig:
-    if variant.config is not None:
-        return variant.config.model_copy(update={"seed": seed, "experiment_name": name})
-    return base.model_copy(
-        update={**variant.overrides, "seed": seed, "experiment_name": name}
+    cfg = (
+        variant.config.model_copy(update={"seed": seed, "experiment_name": name})
+        if variant.config is not None
+        else base.model_copy(
+            update={**variant.overrides, "seed": seed, "experiment_name": name}
+        )
     )
-
-
-def _set_wandb_env(group: str, tags: Sequence[str]) -> None:
-    # RunLogger reads group/tags from wandb's env vars (it does not take them as
-    # args); set them per run so the seeds of one variant share a wandb group.
-    os.environ["WANDB_RUN_GROUP"] = group
-    os.environ["WANDB_TAGS"] = ",".join(tags)
-
-
-def _teardown_wandb() -> None:
-    # wandb caches WANDB_RUN_GROUP / WANDB_TAGS in its process-global setup on the
-    # first init, so per-run env changes are otherwise ignored; tearing the setup
-    # down forces the next init to re-read them.
-    try:
-        import wandb
-
-        wandb.teardown()
-    except Exception:  # pragma: no cover - wandb absent or disabled
-        pass
+    labels = cfg.logging.model_copy(
+        update={
+            "run_name": _run_name(variant.name, seed, seeded),
+            "group": group,
+            "job_type": job_type,
+            "tags": _run_tags(variant.name, seed, tags),
+        }
+    )
+    return cfg.model_copy(update={"logging": labels})
 
 
 def _final(history: list[dict[str, float]], metric: str) -> float:
@@ -127,6 +135,9 @@ def run_sweep(
     metric: str = DEFAULT_METRIC,
     extra_metrics: Sequence[str] = (),
     seed_suffix: bool | None = None,
+    group: str | None = None,
+    job_type: str | None = None,
+    tags: Sequence[str] = (),
 ) -> SweepResult:
     """Train every ``(variant, seed)`` and return their harvested per-run results.
 
@@ -134,21 +145,35 @@ def run_sweep(
     ``None`` keeps the default (suffix iff a variant spans >1 seed). Set it ``True``
     when one logical multi-seed sweep is split across processes (each running a
     single seed) so the per-seed runs share a group without colliding on names.
+
+    ``group``/``job_type``/``tags`` set the wandb hierarchy for every run in this
+    sweep: ``group`` defaults to ``base.experiment_name`` (one framework/scenario
+    collapses in the UI regardless of variant), ``job_type`` defaults to each
+    run's ``variant.name`` (the axis this sweep actually compares); pass an
+    explicit ``job_type`` when the framework's real comparison axis lives outside
+    ``variants`` (e.g. a fixed farm/scenario choice), which then also becomes the
+    caller's responsibility to include in ``tags`` if it should be filterable.
     """
     seeded = len(seeds) > 1 if seed_suffix is None else seed_suffix
+    resolved_group = group if group is not None else base.experiment_name
     runs: list[RunResult] = []
     for variant in variants:
         for seed in seeds:
             name = _experiment_name(base, variant.name, seed, seeded)
-            cfg = _build_config(base, variant, seed, name)
-            _set_wandb_env(
-                f"{base.experiment_name}_{variant.name}",
-                [base.experiment_name, variant.name, f"seed{seed}"],
+            resolved_job_type = job_type if job_type is not None else variant.name
+            cfg = _build_config(
+                base,
+                variant,
+                seed,
+                seeded,
+                name,
+                resolved_group,
+                resolved_job_type,
+                tags,
             )
             start = time.perf_counter()
             history = MappoTrainer(cfg).run()
             seconds = time.perf_counter() - start
-            _teardown_wandb()
             result = _harvest(
                 variant.name, seed, history, metric, seconds, extra_metrics
             )

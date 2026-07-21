@@ -43,6 +43,11 @@ from wind_rl.scenario import RealFarmConfig, resolve_real_farm
 
 _SCORE_METRIC = "eval/episode_reward_mean"
 _POWER_GAIN_METRIC = "eval/power_gain"
+#: wandb group -- every farm/variant/seed of this framework collapses under one
+#: group in the UI; the farm (``config_name``) becomes the run's job_type instead,
+#: since it -- not the (currently singleton) model variant -- is this framework's
+#: real per-invocation comparison axis (see ``_parse_args``).
+_GROUP = "0001_wfcrl_baseline"
 
 
 def _gate(power_gain_threshold: float) -> Gate:
@@ -101,6 +106,9 @@ def main() -> int:
         metric=_SCORE_METRIC,
         extra_metrics=[_POWER_GAIN_METRIC],
         seed_suffix=True if cfg.always_seed_suffix else None,
+        group=_GROUP,
+        job_type=config_name,
+        tags=[config_name],
     )
     summaries = summarize(result, _gate(cfg.power_gain_threshold))
     print(f"\nWFCRL baseline ({config_name}) -- score windows + power gain")
