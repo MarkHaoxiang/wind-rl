@@ -1,0 +1,91 @@
+# 0001_wfcrl_baseline / turb3_row1_windrose -- WFCRL Scenario II on Turb3_Row1.
+#
+# Same 3-turbine farm as `turb3_row1`, but the *windrose* scenario: training
+# resets with freely-sampled free-stream wind (paper Eq. 1) instead of a fixed
+# 270 deg / 8 m/s, and eval is the wind-rose-weighted score. Everything else
+# (150-step episodes, 2048-step updates, PPO block, 2e5 frames, 2 seeds) matches
+# the constant-wind variant.
+#
+# Wind sampling: `scenario.fixed_wind_direction: null` leaves the wfcrl fork to
+# sample on every reset -- wind_speed = 8*Weibull(k=8) clipped [0,28], direction
+# = Normal(270, 20) deg % 360 clipped [0,360] (packages/wfcrl-env/wfcrl/mdp.py).
+# torchrl passes no seed on rollout resets, so each episode draws fresh wind.
+#
+# Eval rose: precomputed once from the SMARTEOLE campaign (402k rows) with the
+# reference recipe -- wd -> (wd+60)%360, np.histogram2d(bins=5), freq = counts /
+# total. Embedded inline (no runtime CSV IO; the 22 MB campaign csv is NOT
+# vendored). See report.md for the generator and provenance.
+
+farm:
+  name: Turb3_Row1
+  margin: 500.0
+
+seeds: [0, 1]
+
+# Provisional rose-weighted steering gate; recalibrate against first results.
+# Constant-wind ablaincourt reached +7.9%, and gains under diverse winds are
+# known to be smaller, so 0.03 is a placeholder floor, not a paper-derived target.
+power_gain_threshold: 0.03
+
+base:
+  experiment_name: 0001_wfcrl_turb3_row1_windrose
+  device: cpu
+  # 98 * 2048 = 200704 ~= 2e5 total frames.
+  n_iters: 98
+  frames_per_batch: 2048
+  n_envs: 1
+  eval_interval: 5
+  eval_episodes: 1
+  checkpoint_interval: 10
+
+  scenario:
+    # name / n_turbines / map_*_length are overwritten by resolve_real_farm.
+    name: wfcrl_placeholder
+    n_turbines: 1
+    max_steps: 150
+    map_x_length: 1.0
+    map_y_length: 1.0
+    min_distance_between_turbines: 150.0
+    # null -> wfcrl samples wind per reset (Scenario II training regime).
+    fixed_wind_direction: null
+    fixed_wind_speed: 8.0
+    load_coef: 1.0
+
+  ppo:
+    clip_epsilon: 0.2
+    gamma: 0.99
+    lmbda: 0.95
+    entropy_eps: 0.0
+    normalize_advantage: true
+    vf_coef: 0.5
+    clip_value_loss: true
+    lr: 3.0e-4
+    adam_eps: 1.0e-5
+    max_grad_norm: 0.5
+    n_epochs: 10
+    num_minibatches: 32
+    reward_batch_norm: true
+    lr_anneal: linear
+
+  # SMARTEOLE wind rose (5 direction x 5 speed bins), frequency-weighted eval.
+  wind_rose:
+    freq:
+      - [0.10939980670183136, 0.030480487568542585, 0.0019926109414714014, 0.00019876418368792035, 1.2422761480495022e-05]
+      - [0.12761902868912536, 0.05345265809827398, 0.002710646555044014, 7.950567347516814e-05, 0.0]
+      - [0.09518568301584895, 0.03096497526628189, 0.0007925721824555824, 7.950567347516814e-05, 0.0]
+      - [0.13379065659263528, 0.12344994993627123, 0.020124873598401937, 0.001657196381498036, 9.689753954786117e-05]
+      - [0.1474656324303642, 0.09749631665122103, 0.020450349949190906, 0.0023205718445564703, 0.00017888776531912833]
+    wd_edges: [0.0003806130605426006, 72.00012644510943, 143.99987227715832, 215.9996181092072, 287.9993639412561, 359.999109773305]
+    ws_edges: [2.37, 6.838, 11.306000000000001, 15.774000000000001, 20.242, 24.71]
+
+  logging:
+    project: wind-rl
+    use_wandb: true
+
+variants:
+  - name: mlp
+    model:
+      kind: mlp
+      num_cells: 64
+      depth: 2
+      initial_std: 1.0

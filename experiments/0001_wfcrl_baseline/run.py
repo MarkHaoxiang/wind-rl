@@ -1,13 +1,19 @@
 """0001_wfcrl_baseline: reproduce the WFCRL NeurIPS-2024 MAPPO benchmark.
 
-Recreates the paper's Scenario I (constant wind, yaw-only control) inside our
-torchrl MAPPO stack, matching the official setup (episode 150, 2048-step
-updates, 32 minibatches x 10 epochs, linear-annealed lr, per-rollout reward
-standardisation, clipped value loss) wherever it is config-reachable. Two config
-entry points select the farm (``config=<name>``):
+Recreates the paper's Scenario I (constant wind, yaw-only control) and Scenario II
+(freely-sampled wind, wind-rose-weighted eval) inside our torchrl MAPPO stack,
+matching the official setup (episode 150, 2048-step updates, 32 minibatches x 10
+epochs, linear-annealed lr, per-rollout reward standardisation, clipped value
+loss) wherever it is config-reachable. The config entry points select the farm
+and scenario (``config=<name>``):
 
   * ``turb3_row1``  -- 3 aligned turbines, 4D spacing (``Turb3_Row1`` wfcrl case).
   * ``ablaincourt`` -- the 7-turbine real French farm (``Ablaincourt`` wfcrl case).
+  * ``turb3_row1_windrose`` / ``ablaincourt_windrose`` -- the same two farms under
+    Scenario II: ``scenario.fixed_wind_direction`` unset (wfcrl samples wind per
+    reset) and ``base.wind_rose`` set, so eval sweeps the 25-bin SMARTEOLE rose
+    and the score/power gain become frequency-weighted (see the rose variants'
+    conf comments + report.md). The verdict gate is unchanged in shape.
 
 Both farms flow through ``resolve_real_farm`` (fetch the wfcrl coordinates,
 translate them in-map) so the layout is never hardcoded. The sweep loop, metric

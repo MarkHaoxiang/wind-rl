@@ -163,6 +163,99 @@ amplifier. **An entropy bonus would make it worse** (entropy is already too high
 in the failing run). These touch matched-setup fidelity, so they are the owner's
 call.
 
+## Scenario II (windrose) -- built, not yet run
+
+Two further variants add the paper's **Scenario II** (freely-sampled wind, wind-
+rose-weighted eval) to this same framework: `turb3_row1_windrose` and
+`ablaincourt_windrose`. Same farms, same PPO block, same 2e5-frame / 2-seed
+budget; only the wind regime and the eval metric change.
+
+### Training wind (sampled per episode)
+
+`scenario.fixed_wind_direction: null` disables the fixed-wind override, so the
+wfcrl fork samples free-stream wind on every reset. torchrl passes no seed on
+rollout resets, so each episode draws fresh wind (verified: 6 consecutive resets
+gave speeds 7.6-10.0 m/s and directions 228-273 deg). The fork's sampler
+(`packages/wfcrl-env/wfcrl/mdp.py`, READ-ONLY):
+
+- **speed** `8 * rng.weibull(8)` clipped to `[0, 28]` (Weibull shape k=8, scale 8;
+  mean ~7.53 m/s),
+- **direction** `rng.normal(270, 20) % 360` clipped to `[0, 360]`.
+
+**Vs the paper (Eq. 1: u_inf ~ Weibull, phi_inf ~ Normal).** The *distributional
+families match* (Weibull speed, Normal direction). The concrete parameters are
+the wfcrl defaults (k=8, scale 8; N(270, 20)), which are not stated numerically
+in the paper, so this is a family-faithful but not parameter-verified match. Two
+minor fidelity notes, both recorded rather than worked around (the fork is a
+read-only submodule): (1) the reference benchmark re-seeds each episode with
+`seed + global_step` for reproducible-yet-varying wind, whereas our stack draws
+from fresh OS entropy each reset -- statistically equivalent, not run-reproducible;
+(2) the Weibull scale of 8 gives a slightly sub-8 m/s mean speed.
+
+### Eval (wind-rose-weighted score)
+
+The eval loop (`MappoTrainer._eval_wind_rose`) runs **one deterministic episode
+per rose bin** (T=150, env wind overridden to the bin's center via the wrapper's
+`set_wind_override`) and reports `score = sum_ij freq[i,j] * episode_reward[i,j]`.
+The rose is a 5x5 direction x speed histogram built from the **SMARTEOLE** campaign
+(402,487 rows) with the reference recipe (`prepare_wind_rose`): `wd -> (wd+60)%360`,
+`np.histogram2d(bins=5)`, `freq = counts / total`. It is embedded inline in each
+windrose yaml under `base.wind_rose` (frequencies + bin edges).
+
+**Rose data provenance / deviation.** The reference `data/smarteole.csv` is
+**22 MB** -- too large to vendor -- so it is *not* copied into the repo. Instead the
+rose was precomputed once from that csv with `prepare_wind_rose` and the resulting
+25 frequencies + 12 edges pasted into the two yamls. Regenerate with:
+
+    import pandas as pd; from wind_rl.rl.wind_rose import prepare_wind_rose, WindRoseEvalConfig
+    df = pd.read_csv("smarteole.csv")
+    print(WindRoseEvalConfig.from_rose(prepare_wind_rose(df.wd.values, df.ws.values)).model_dump())
+
+A frequency-weighted **greedy** (zero-yaw) baseline is computed the same way once
+at startup (`_greedy_rose_baseline_power`), so `eval/power_gain` stays meaningful
+as a rose-weighted number. Logged: per-bin scores `eval/rose/score_d{i}_s{j}`,
+`eval/rose/greedy_power_mw`, plus the weighted aggregates (`eval/episode_reward_mean`
+= weighted score, `eval/power_gain`, `eval/episode_power_mw`).
+
+### Paper reference numbers (context, not a target)
+
+Scenario II eval scores rose from ~3500 -> ~5300 (Turb3Row1) and ~2600 -> ~4300
+(Ablaincourt, IPPO). **Those were computed with T=2048 eval episodes**, whereas
+our eval uses the env's T=150, so absolute scores are **not** directly comparable
+-- expect ours ~13.7x smaller (2048/150) before any other difference. The repo's
+own eval loop used the env's episode length, which we match.
+
+### Provisional gate (recalibration pending first results)
+
+Both windrose variants use the **unchanged** `improves_ratio(1.05)` learning gate
+and a rose-weighted steering gate `eval/power_gain >= 0.03` (`power_gain_threshold:
+0.03` in both yamls). **0.03 is a provisional placeholder, not a paper-derived
+target**: constant-wind `ablaincourt` reached +7.9%, and steering gains under
+*diverse* winds are known to be smaller (many directions have little wake
+overlap), so the threshold will be recalibrated against the first real rose-eval
+results.
+
+### Serial-Refine reference -- deferred (proposed follow-up)
+
+The optional FLORIS Serial-Refine reference line was **not** included. FLORIS 3.5
+ships `floris.tools.optimization.yaw_optimization.yaw_optimizer_sr.YawOptimizationSR`
+and it imports cleanly, so computing per-bin *optimal absolute yaw* is cheap. The
+blocker is comparability: wfcrl's yaw control is an **incremental, rate-limited**
+command (dyaw per step, with the ~10%-horizon actuation cap), so an absolute SR
+yaw target cannot be applied as a constant per-step action to produce an episode
+score on the same axis as `eval/rose/score`. A faithful reference needs a small
+set-point controller that ramps to the SR target under the actuation budget. That
+is feasible but out of scope for this pass; proposed as a follow-up to log
+`eval/serial_refine_score` as a reference line (never a gate).
+
+### Smoke evidence
+
+Both variants ran end-to-end with `WIND_RL_WANDB_MODE=disabled`, 2 iterations,
+reduced batch (`n_iters=2 frames_per_batch=32 max_steps=8 seeds=[0]`): the 25-bin
+greedy baseline and 25-bin rose eval both executed, per-bin scores logged, weighted
+score/power-gain produced (`turb3_row1_windrose` score 23.06, gain -0.4%;
+`ablaincourt_windrose` score 19.76, gain +0.2% -- expected FAIL at 2 iters).
+
 ## Decision
 
 Verdict gates (asserted in `run.py`, per variant across all seeds):
@@ -247,3 +340,7 @@ what would flip this variant to PASS honestly.
     # (shared wandb group, _s{seed} run names, no collision with 0/1):
     WIND_RL_WANDB_MODE=online uv run python experiments/0001_wfcrl_baseline/run.py \
         config=ablaincourt seeds=[2] +always_seed_suffix=true
+
+    # Scenario II (windrose): sampled training wind + rose-weighted eval
+    WIND_RL_WANDB_MODE=online uv run python experiments/0001_wfcrl_baseline/run.py config=turb3_row1_windrose
+    WIND_RL_WANDB_MODE=online uv run python experiments/0001_wfcrl_baseline/run.py config=ablaincourt_windrose
