@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from wind_rl.rl.wind_rose import (
     WindRose,
     WindRoseEvalConfig,
+    WindRoseSampler,
     prepare_wind_rose,
 )
 
@@ -78,6 +79,32 @@ def test_bins_enumerates_every_cell_in_order() -> None:
     # First cell's representative is the (wd, ws) edge midpoint.
     first = next(rose.bins())
     assert first == (0, 0, 45.0, 2.0)
+
+
+def test_sample_only_draws_nonzero_bins_at_their_frequency() -> None:
+    # Two nonzero bins (0.7 / 0.3); the sampler must never touch the zero bins and
+    # must return the bin *centers* (the exact winds eval scores those bins at).
+    freq = np.array([[0.7, 0.0], [0.0, 0.3]])
+    rose = WindRose(freq, np.array([0.0, 90.0, 180.0]), np.array([0.0, 4.0, 8.0]))
+    rng = np.random.default_rng(0)
+    draws = [rose.sample(rng) for _ in range(5000)]
+
+    assert set(draws) == {(45.0, 2.0), (135.0, 6.0)}
+    frac_first = sum(d == (45.0, 2.0) for d in draws) / len(draws)
+    assert frac_first == pytest.approx(0.7, abs=0.03)
+
+
+def test_sampler_is_seeded_and_reproducible() -> None:
+    freq = np.array([[0.5, 0.5]])
+    rose = WindRose(freq, np.array([0.0, 90.0]), np.array([0.0, 4.0, 8.0]))
+    seq = [WindRoseSampler(rose, 3)() for _ in range(1)]  # smoke the call path
+    assert seq[0] in {(45.0, 2.0), (45.0, 6.0)}
+    same = [WindRoseSampler(rose, 3)(), WindRoseSampler(rose, 3)()]
+    assert same[0] == same[1]  # identical seed -> identical first draw
+
+    s = WindRoseSampler(rose, 3)
+    t = WindRoseSampler(rose, 3)
+    assert [s() for _ in range(30)] == [t() for _ in range(30)]
 
 
 def test_config_round_trips_through_rose() -> None:

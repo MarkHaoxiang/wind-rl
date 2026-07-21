@@ -20,7 +20,6 @@ import torch
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from tensordict import TensorDictBase
-from torch.nn.utils import clip_grad_norm_
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, ReplayBuffer, SamplerWithoutReplacement
 from torchrl.envs import EnvBase, ParallelEnv, SerialEnv, TransformedEnv
@@ -51,8 +50,9 @@ from wind_rl.rl.mappo import (
     batch_normalise_reward,
     build_loss_module,
     build_optimiser,
+    run_ppo_epochs,
 )
-from wind_rl.rl.wind_rose import WindRose, WindRoseEvalConfig
+from wind_rl.rl.wind_rose import WindRose, WindRoseEvalConfig, WindRoseSampler
 from wind_rl.scenario import ScenarioConfig
 from wind_rl.static import GROUP_NAME
 from wind_rl.utils import pinned_worker_threads, resolve_device, seed_all
@@ -65,6 +65,7 @@ _STATE_VALUE_KEY = (GROUP_NAME, "state_value")
 _SCALE_KEY = (GROUP_NAME, "scale")
 _ACTION_KEY = (GROUP_NAME, "action", "yaw")
 _POWER_KEY = ("power",)
+_LOAD_KEY = ("load",)
 _GAUSSIAN_ENTROPY_CONST = 0.5 * math.log(2.0 * math.pi * math.e)
 #: Upper bound on auto-resolved parallel env workers (DiCoDe's ParallelEnv cap).
 _AUTO_ENV_CAP = 20
@@ -148,6 +149,20 @@ class TrainingConfig(Config):
         return self
 
     @model_validator(mode="after")
+    def _rose_training_is_single_env(self) -> TrainingConfig:
+        if (
+            self.wind_rose is not None
+            and self.wind_rose.train_from_rose
+            and self.n_envs != 1
+        ):
+            raise ValueError(
+                "wind_rose.train_from_rose requires n_envs=1: the per-episode wind "
+                "sampler is a live object attached to the in-process env and cannot "
+                "cross a ParallelEnv worker boundary"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _layout_xor_designer(self) -> TrainingConfig:
         if self.layout is not None and self.designer is not None:
             raise ValueError(
@@ -175,6 +190,13 @@ class _EvalResult(NamedTuple):
     power_mean: float
     image: NDArray[np.uint8] | None
     replay_html: str | None
+
+
+class _RoseBaseline(NamedTuple):
+    #: Rose-weighted zero-yaw farm power (MW) and episode score, so eval power gain
+    #: reads against the do-nothing baseline and a below-greedy policy is visible.
+    power_mw: float
+    score: float
 
 
 def _layout_array(cfg: TrainingConfig) -> NDArray[np.float64] | None:
@@ -376,12 +398,14 @@ class MappoTrainer:
         env.close()
         return float(np.mean(powers))
 
-    def _greedy_rose_baseline_power(self, rose: WindRose) -> float:
-        """Rose-weighted mean farm power (MW) under zero-yaw control.
+    def _greedy_rose_baseline(self, rose: WindRose) -> _RoseBaseline:
+        """Rose-weighted zero-yaw farm power (MW) *and* episode score.
 
         One zero-yaw episode per rose bin (wind fixed to the bin representative),
         weighted by the bin frequency. Computed once at startup so the rose eval
-        power gain stays readable against the do-nothing baseline per bin.
+        power gain reads against the do-nothing baseline per bin, and the weighted
+        greedy score is logged so a policy scoring *below* zero-yaw greedy is
+        directly visible rather than hidden behind the improves-ratio gate.
         """
         env = self._make_env("eval")
         wrapper = env.base_env
@@ -389,20 +413,24 @@ class MappoTrainer:
         action_key = env.action_key
         zero_action = env.full_action_spec[action_key].zero()
         powers = np.zeros_like(rose.freq)
+        scores = np.zeros_like(rose.freq)
         for i, j, wd, ws in rose.bins():
             wrapper.set_wind_override((wd, ws))
             bin_powers: list[float] = []
+            bin_score = 0.0
             td = env.reset()
             for _ in range(max_steps):
                 td.set(action_key, zero_action)
                 td = env.step(td)
                 bin_powers.append(float(td["next", *_POWER_KEY].mean()))
+                bin_score += float(td["next", *_REWARD_KEY].mean())
                 if bool(td["next", *_DONE_KEY].any()):
                     break
                 td = step_mdp(td)
             powers[i, j] = float(np.mean(bin_powers))
+            scores[i, j] = bin_score
         env.close()
-        return rose.weighted(powers)
+        return _RoseBaseline(rose.weighted(powers), rose.weighted(scores))
 
     def _eval_wind_rose(
         self, policy: torch.nn.Module, rose: WindRose, record_replay: bool
@@ -410,8 +438,8 @@ class MappoTrainer:
         """Deterministic rose eval: one episode per bin, frequency-weighted.
 
         Returns an :class:`_EvalResult` whose ``reward_mean``/``power_mean`` are
-        the rose-weighted score and power, plus a dict of per-bin scores keyed
-        ``eval/rose/score_d{i}_s{j}`` for the log.
+        the rose-weighted score and power, plus a dict of per-bin score/power/load
+        keyed ``eval/rose/{score,power,load}_d{i}_s{j}`` for the log.
         """
         env = self._make_env("eval")
         wrapper = env.base_env
@@ -426,9 +454,14 @@ class MappoTrainer:
                 wrapper.set_wind_override((wd, ws))
                 rollout = env.rollout(max_steps, policy, break_when_any_done=True)
                 reward = float(rollout["next", *_EPISODE_REWARD_KEY][-1].mean())
+                power = float(rollout["next", *_POWER_KEY].mean())
                 rewards[i, j] = reward
-                powers[i, j] = float(rollout["next", *_POWER_KEY].mean())
+                powers[i, j] = power
                 per_bin[f"eval/rose/score_d{i}_s{j}"] = reward
+                per_bin[f"eval/rose/power_d{i}_s{j}"] = power
+                per_bin[f"eval/rose/load_d{i}_s{j}"] = float(
+                    rollout["next", *_LOAD_KEY].mean()
+                )
                 if record_replay and (i, j) == last:
                     replay_html = _replay_html(env, policy)
         render = _render_eval(env)
@@ -486,8 +519,20 @@ class MappoTrainer:
                 designer.generate_layout_batch(self._layouts_per_iter(n_envs))
             )
 
+        rose = cfg.wind_rose.to_rose() if cfg.wind_rose is not None else None
+        train_env = self._build_train_env(n_envs, consumer)
+        if (
+            rose is not None
+            and cfg.wind_rose is not None
+            and cfg.wind_rose.train_from_rose
+        ):
+            # n_envs==1 is enforced by TrainingConfig, so this is the in-process
+            # TransformedEnv whose base_env is the wfcrl wrapper.
+            assert isinstance(train_env, TransformedEnv)
+            train_env.base_env.set_wind_sampler(WindRoseSampler(rose, cfg.seed))
+
         collector = SyncDataCollector(
-            self._build_train_env(n_envs, consumer),
+            train_env,
             policy,
             frames_per_batch=cfg.frames_per_batch,
             total_frames=cfg.frames_per_batch * cfg.n_iters,
@@ -501,12 +546,13 @@ class MappoTrainer:
             batch_size=minibatch_size,
         )
 
-        rose = cfg.wind_rose.to_rose() if cfg.wind_rose is not None else None
-        baseline_power = (
-            self._greedy_rose_baseline_power(rose)
-            if rose is not None
-            else self._greedy_baseline_power()
-        )
+        greedy_score: float | None = None
+        if rose is not None:
+            baseline = self._greedy_rose_baseline(rose)
+            baseline_power = baseline.power_mw
+            greedy_score = baseline.score
+        else:
+            baseline_power = self._greedy_baseline_power()
 
         logger = RunLogger(cfg, self.settings)
         history: list[dict[str, float]] = []
@@ -539,28 +585,9 @@ class MappoTrainer:
 
                 policy.train()
                 critic.train()
-                grad_norms: list[float] = []
-                diagnostics: dict[str, list[float]] = {}
-                for _ in range(cfg.ppo.n_epochs):
-                    for _ in range(cfg.ppo.num_minibatches):
-                        minibatch = replay_buffer.sample()
-                        loss_vals = loss_module(minibatch)
-                        loss_value = (
-                            loss_vals["loss_objective"] + loss_vals["loss_critic"]
-                        )
-                        if cfg.ppo.entropy_eps > 0:
-                            loss_value = loss_value + loss_vals["loss_entropy"]
-                        loss_value.backward()
-                        grad_norms.append(
-                            float(
-                                clip_grad_norm_(
-                                    loss_module.parameters(), cfg.ppo.max_grad_norm
-                                )
-                            )
-                        )
-                        optimiser.step()
-                        optimiser.zero_grad()
-                        _accumulate_diagnostics(diagnostics, loss_vals, loss_value)
+                grad_norms, diagnostics = run_ppo_epochs(
+                    loss_module, replay_buffer, optimiser, cfg.ppo
+                )
                 if scheduler is not None:
                     scheduler.step()
                 collector.update_policy_weights_()
@@ -601,6 +628,8 @@ class MappoTrainer:
                         result, per_bin = self._eval_wind_rose(policy, rose, replay_now)
                         metrics.update(per_bin)
                         metrics["eval/rose/greedy_power_mw"] = baseline_power
+                        if greedy_score is not None:
+                            metrics["eval/greedy_score"] = greedy_score
                     else:
                         result = self._eval(policy, replay_now)
                     eval_s = time.perf_counter() - t0
@@ -683,25 +712,6 @@ class MappoTrainer:
             logger.finish()
 
         return history
-
-
-def _accumulate_diagnostics(
-    diagnostics: dict[str, list[float]],
-    loss_vals: TensorDictBase,
-    total: torch.Tensor,
-) -> None:
-    diagnostics.setdefault("loss/total", []).append(float(total.mean()))
-    keys = {
-        "loss/objective": "loss_objective",
-        "loss/critic": "loss_critic",
-        "loss/clip_fraction": "clip_fraction",
-        "loss/approx_kl": "kl_approx",
-        "loss/entropy": "loss_entropy",
-        "loss/explained_variance": "explained_variance",
-    }
-    for metric, key in keys.items():
-        if key in loss_vals.keys():  # noqa: SIM118 - TensorDict keys view
-            diagnostics.setdefault(metric, []).append(float(loss_vals[key].mean()))
 
 
 def _render_eval(env: object) -> NDArray[np.uint8] | None:

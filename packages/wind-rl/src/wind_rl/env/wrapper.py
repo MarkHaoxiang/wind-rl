@@ -27,6 +27,8 @@ layout).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import torch
 from numpy.typing import NDArray
@@ -62,6 +64,7 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         self._layout_consumer = layout_consumer
         self._layout_override: torch.Tensor | None = None
         self._wind_override: tuple[float, float] | None = None
+        self._wind_sampler: Callable[[], tuple[float, float]] | None = None
         # Populated in ``_make_specs``; cached so the per-step state build (see
         # ``_state_tensordict``) doesn't re-index the Composite state spec (which
         # rebuilds a sub-spec per key) on every reset/step.
@@ -100,6 +103,18 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         """Fix (or clear, with ``None``) the reset wind as ``(direction_deg, speed_ms)``."""
         self._wind_override = wind
 
+    def set_wind_sampler(
+        self, sampler: Callable[[], tuple[float, float]] | None
+    ) -> None:
+        """Set (or clear) a per-reset wind sampler ``() -> (direction_deg, speed_ms)``.
+
+        Called on every reset when no fixed :meth:`set_wind_override` is active, so
+        each episode draws a fresh wind (rose-matched training, Scenario II). A
+        fixed override always wins, so the eval path's per-bin override is
+        unaffected.
+        """
+        self._wind_sampler = sampler
+
     def farm_power(self) -> float:
         """Total farm power (MW) from the last step's per-turbine infos; 0 pre-step.
 
@@ -110,6 +125,21 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
         """
         infos = getattr(self.designable_env, "infos", {})
         return float(sum(float(info.get("power", 0.0)) for info in infos.values()))
+
+    def farm_load(self) -> float:
+        """Mean ``|load|`` proxy across turbines from the last step's infos; 0 pre-step.
+
+        Mirrors the wfcrl reward's ``load_coef * mean(|loads|)`` penalty term so
+        the unshaped load is observable per rose bin alongside power. ``0`` when the
+        interface exposes no load measure (the reward's own fallback).
+        """
+        infos = getattr(self.designable_env, "infos", {})
+        per_agent = [
+            float(np.abs(np.asarray(info["load"])).mean())
+            for info in infos.values()
+            if "load" in info
+        ]
+        return float(np.mean(per_agent)) if per_agent else 0.0
 
     def _make_specs(self, env: object) -> None:
         super()._make_specs(env)
@@ -123,9 +153,14 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
             )
         self.observation_spec["state"] = state_spec
         self._state_dtypes = {key: spec.dtype for key, spec in state_spec.items()}
-        # Farm-level raw power (MW), injected each step so the unnormalised
-        # episode power travels through rollouts as a plain observation.
+        # Farm-level raw power (MW) and mean |load| proxy, injected each step so
+        # the unnormalised episode power/load travel through rollouts as plain
+        # observations (the models read only the per-agent group keys, so these
+        # farm-level extras are ignored by the networks).
         self.observation_spec["power"] = Unbounded(
+            shape=torch.Size([1]), device=self.device
+        )
+        self.observation_spec["load"] = Unbounded(
             shape=torch.Size([1]), device=self.device
         )
 
@@ -165,13 +200,17 @@ class WfcrlCoDesignWrapper(PettingZooWrapper):  # type: ignore[misc]
             options["ycoords"] = theta[:, 1]
         if self._wind_override is not None:
             options["wind_direction"], options["wind_speed"] = self._wind_override
+        elif self._wind_sampler is not None:
+            options["wind_direction"], options["wind_speed"] = self._wind_sampler()
         out = super()._reset(tensordict, options=options or None, **kwargs)
         out.set("state", self._state_tensordict())
         out.set("power", torch.zeros(1, device=self.device))
+        out.set("load", torch.zeros(1, device=self.device))
         return out
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         out = super()._step(tensordict)
         out.set("state", self._state_tensordict())
         out.set("power", torch.tensor([self.farm_power()], device=self.device))
+        out.set("load", torch.tensor([self.farm_load()], device=self.device))
         return out

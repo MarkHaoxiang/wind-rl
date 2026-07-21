@@ -65,6 +65,35 @@ class WindRose:
             )
         return float(np.sum(self.freq * per_bin))
 
+    def sample(self, rng: np.random.Generator) -> tuple[float, float]:
+        """Draw one ``(wind_direction, wind_speed)`` from the rose distribution.
+
+        A bin is chosen with probability equal to its frequency, then its **center**
+        (edge midpoint) is returned -- the exact wind the deterministic eval scores
+        that bin at, so rose-matched training and eval see the identical discrete
+        wind set rather than the wfcrl fork's ``N(270, 20)`` default.
+        """
+        idx = int(rng.choice(self.freq.size, p=self.freq.ravel()))
+        i, j = np.unravel_index(idx, self.freq.shape)
+        wd_values, ws_values = self.centers()
+        return float(wd_values[i]), float(ws_values[j])
+
+
+class WindRoseSampler:
+    """A picklable per-episode wind sampler over a :class:`WindRose`.
+
+    Held by the env wrapper (:meth:`~wind_rl.env.wrapper.WfcrlCoDesignWrapper.set_wind_sampler`)
+    and called once per reset. Seeded from the run seed so the wind sequence is
+    reproducible per seed.
+    """
+
+    def __init__(self, rose: WindRose, seed: int) -> None:
+        self._rose = rose
+        self._rng = np.random.default_rng(seed)
+
+    def __call__(self) -> tuple[float, float]:
+        return self._rose.sample(self._rng)
+
 
 def prepare_wind_rose(
     wd: NDArray[np.float64],
@@ -98,6 +127,13 @@ class WindRoseEvalConfig(Config):
     freq: list[list[float]] = Field(min_length=1)
     wd_edges: list[float] = Field(min_length=2)
     ws_edges: list[float] = Field(min_length=2)
+    #: Sample each training episode's free-stream wind from *this* rose (a bin by
+    #: frequency, then its center; see :meth:`WindRose.sample`) instead of the
+    #: wfcrl fork's ``N(270, 20)`` default -- so training and eval share one wind
+    #: distribution. Requires single-env collection (``n_envs=1``): the sampler is
+    #: a live object attached to the in-process env and cannot cross a worker
+    #: process boundary.
+    train_from_rose: bool = False
 
     @model_validator(mode="after")
     def _shapes_and_normalisation(self) -> WindRoseEvalConfig:

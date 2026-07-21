@@ -5,8 +5,11 @@ from __future__ import annotations
 from typing import Literal
 
 import torch
+from tensordict import TensorDictBase
 from tensordict.utils import NestedKey
 from torch import optim
+from torch.nn.utils import clip_grad_norm_
+from torchrl.data import ReplayBuffer
 from torchrl.objectives import ClipPPOLoss, ValueEstimators
 
 from wind_rl.config import Config
@@ -34,6 +37,12 @@ class PPOConfig(Config):
     max_grad_norm: float = 1.0
     n_epochs: int = 4
     num_minibatches: int = 4
+    #: KL trust-region guard (CleanRL's ``--target-kl``). When set, the
+    #: ``n_epochs x num_minibatches`` update halts as soon as a minibatch's
+    #: ``approx_kl`` exceeds this, so a single runaway batch cannot keep pushing
+    #: the policy across the whole update. ``None`` disables the guard (the paper's
+    #: Table 5 default). See :func:`wind_rl.rl.trainer._ppo_epochs`.
+    target_kl: float | None = None
     #: Standardise each rollout's rewards (over the whole collected batch) before
     #: GAE -- recomputed fresh per update, not a running normaliser.
     reward_batch_norm: bool = False
@@ -84,6 +93,69 @@ def build_loss_module(
         ValueEstimators.GAE, gamma=cfg.gamma, lmbda=cfg.lmbda
     )
     return loss_module
+
+
+def run_ppo_epochs(
+    loss_module: torch.nn.Module,
+    replay_buffer: ReplayBuffer,
+    optimiser: optim.Optimizer,
+    cfg: PPOConfig,
+) -> tuple[list[float], dict[str, list[float]]]:
+    """Run PPO's ``n_epochs x num_minibatches`` update over the sampled batch.
+
+    When ``cfg.target_kl`` is set, the whole update halts (both loops) the moment a
+    minibatch's ``approx_kl`` exceeds it -- CleanRL's ``--target-kl`` trust-region
+    guard, checked *per minibatch* (finer than CleanRL's per-epoch check) so a
+    single runaway batch cannot keep pushing the policy across the remaining
+    epochs. ``optim/kl_early_stop`` records whether the guard fired this update.
+    """
+    grad_norms: list[float] = []
+    diagnostics: dict[str, list[float]] = {}
+    stopped = False
+    for _ in range(cfg.n_epochs):
+        for _ in range(cfg.num_minibatches):
+            minibatch = replay_buffer.sample()
+            loss_vals = loss_module(minibatch)
+            loss_value = loss_vals["loss_objective"] + loss_vals["loss_critic"]
+            if cfg.entropy_eps > 0:
+                loss_value = loss_value + loss_vals["loss_entropy"]
+            loss_value.backward()
+            grad_norms.append(
+                float(clip_grad_norm_(loss_module.parameters(), cfg.max_grad_norm))
+            )
+            optimiser.step()
+            optimiser.zero_grad()
+            _accumulate_diagnostics(diagnostics, loss_vals, loss_value)
+            if (
+                cfg.target_kl is not None
+                and "kl_approx" in loss_vals.keys()  # noqa: SIM118 - TensorDict keys view
+                and float(loss_vals["kl_approx"].mean()) > cfg.target_kl
+            ):
+                stopped = True
+                break
+        if stopped:
+            break
+    diagnostics.setdefault("optim/kl_early_stop", []).append(1.0 if stopped else 0.0)
+    return grad_norms, diagnostics
+
+
+def _accumulate_diagnostics(
+    diagnostics: dict[str, list[float]],
+    loss_vals: TensorDictBase,
+    total: torch.Tensor,
+) -> None:
+    diagnostics.setdefault("loss/total", []).append(float(total.mean()))
+    keys = {
+        "loss/objective": "loss_objective",
+        "loss/critic": "loss_critic",
+        "loss/clip_fraction": "clip_fraction",
+        "loss/approx_kl": "kl_approx",
+        "loss/entropy": "loss_entropy",
+        "loss/explained_variance": "explained_variance",
+    }
+    for metric, key in keys.items():
+        if key in loss_vals.keys():  # noqa: SIM118 - TensorDict keys view
+            diagnostics.setdefault(metric, []).append(float(loss_vals[key].mean()))
 
 
 def build_optimiser(

@@ -118,6 +118,24 @@ def test_farm_power_injected_and_positive(scenario: ScenarioConfig) -> None:
     )
 
 
+def test_farm_load_injected_and_nonnegative(scenario: ScenarioConfig) -> None:
+    """The injected farm load proxy is zero on reset, non-negative once stepping."""
+    env = make_env("train", scenario)
+    env.set_seed(0)
+
+    reset = env.reset()
+    assert float(reset["load"]) == 0.0
+
+    rollout = env.rollout(5)
+    loads = rollout["next", "load"]
+    assert loads.shape == torch.Size([5, 1])
+    assert torch.all(loads >= 0.0)
+    # The last injected step load equals the wrapper's live farm-load reading.
+    torch.testing.assert_close(
+        float(loads[-1]), env.base_env.farm_load(), atol=1e-4, rtol=1e-4
+    )
+
+
 def test_load_coef_flows_into_env(scenario: ScenarioConfig) -> None:
     """scenario.load_coef reaches the wfcrl env's reward weighting."""
     heavy = scenario.model_copy(update={"load_coef": 1.0})

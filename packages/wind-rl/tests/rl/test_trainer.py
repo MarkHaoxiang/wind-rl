@@ -23,6 +23,7 @@ from wind_rl.rl.trainer import (
     MappoTrainer,
     TrainingConfig,
 )
+from wind_rl.rl.wind_rose import WindRoseEvalConfig
 from wind_rl.scenario import ScenarioConfig
 from wind_rl.static import GROUP_NAME
 from wind_rl.utils import seed_all
@@ -65,6 +66,21 @@ def _designer_config() -> TrainingConfig:
             "n_iters": 1,
             "layout": None,
             "designer": RandomDesignerConfig(seed=0),
+        }
+    )
+
+
+def _rose_config() -> TrainingConfig:
+    cfg = _config()
+    return cfg.model_copy(
+        update={
+            "experiment_name": "test_trainer_rose",
+            "wind_rose": WindRoseEvalConfig(
+                freq=[[0.6, 0.1], [0.2, 0.1]],
+                wd_edges=[240.0, 260.0, 280.0],
+                ws_edges=[6.0, 8.0, 10.0],
+                train_from_rose=True,
+            ),
         }
     )
 
@@ -147,6 +163,28 @@ def test_checkpoint_reload_matches_pretrained_outputs(tmp_path: Path) -> None:
 
     torch.testing.assert_close(reference_action, fresh_action)
     torch.testing.assert_close(reference_value, fresh_value)
+
+
+def test_rose_eval_logs_greedy_score_and_per_bin_power_load() -> None:
+    cfg = _rose_config()
+
+    history = MappoTrainer(cfg).run()
+
+    latest = history[-1]
+    # Rose-weighted greedy score is logged so a below-greedy policy is visible.
+    assert "eval/greedy_score" in latest
+    # Per-bin power and load land alongside the pre-existing per-bin score.
+    assert "eval/rose/score_d0_s0" in latest
+    assert "eval/rose/power_d0_s0" in latest
+    assert "eval/rose/load_d0_s0" in latest
+    assert "eval/rose/power_d1_s1" in latest
+    assert "eval/rose/load_d1_s1" in latest
+
+
+def test_train_from_rose_requires_single_env() -> None:
+    cfg = _rose_config()
+    with pytest.raises(ValidationError, match="train_from_rose"):
+        TrainingConfig.model_validate({**cfg.model_dump(), "n_envs": 2})
 
 
 def test_layout_and_designer_are_mutually_exclusive() -> None:
