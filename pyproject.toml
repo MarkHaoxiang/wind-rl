@@ -22,6 +22,7 @@ wind-rl = { workspace = true }
 # CI relies on. Verified empirically: `--only-dev` with wind-rl omitted here
 # installs tooling only; with it added, torch+CUDA wheels come along.
 dev = [
+    "beartype>=0.19",
     "mypy>=1.11",
     "pre-commit>=4",
     "pydantic>=2",
@@ -78,8 +79,9 @@ module = ["wfcrl.*", "torchrl.*", "tensordict.*", "pettingzoo.*", "wandb.*", "hy
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["packages/wind-rl/tests"]
+testpaths = ["packages/wind-rl/tests", "packages/windrl-engine/tests"]
 addopts = "-q"
 markers = [
     "sim: touches wfcrl/FLORIS (needs system MPI + FLORIS at import); run locally, excluded from CI via `-m 'not sim'`",
+    "slow: long-running (large sample counts, many env steps); excluded from quick local runs on request only, not from CI by default",
 ]
