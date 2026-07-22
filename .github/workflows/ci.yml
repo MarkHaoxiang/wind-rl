@@ -59,14 +59,25 @@ jobs:
       - name: Install wind-rl (editable, no deps)
         run: uv pip install --no-deps -e packages/wind-rl
 
+      # windrl-engine is pure-Python + jax; the default jax wheel is the CPU
+      # build, so unlike torch no index redirection is needed. beartype backs
+      # the jaxtyping runtime shape checks in its test conftest.
+      - name: Install windrl-engine deps (CPU jax) and package
+        run: >-
+          uv pip install "jax>=0.7" "jaxtyping>=0.3.10" "beartype>=0.19"
+          && uv pip install --no-deps -e packages/windrl-engine
+
       - name: Ruff check
-        run: uv run --no-sync ruff check packages/wind-rl/src packages/wind-rl/tests experiments
+        run: uv run --no-sync ruff check packages/wind-rl/src packages/wind-rl/tests packages/windrl-engine/src packages/windrl-engine/tests experiments
 
       - name: Ruff format check
-        run: uv run --no-sync ruff format --check packages/wind-rl/src packages/wind-rl/tests
+        run: uv run --no-sync ruff format --check packages/wind-rl/src packages/wind-rl/tests packages/windrl-engine/src packages/windrl-engine/tests
 
       - name: Mypy
         run: uv run --no-sync mypy packages/wind-rl/src packages/wind-rl/tests
+
+      - name: Mypy (windrl-engine)
+        run: uv run --no-sync mypy packages/windrl-engine/src
 
       # Experiments are standalone Hydra scripts in digit-prefixed dirs (run.py
       # collides as a duplicate module across dirs), so each dir is checked on
