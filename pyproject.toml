@@ -36,13 +36,19 @@ extend-exclude = ["packages/wfcrl-env"]
 # auto-detects by default; without this, isort no longer recognizes `wind_rl`
 # as first-party and re-groups import blocks (moved files must stay
 # byte-identical).
-src = ["packages/wind-rl/src"]
+src = ["packages/wind-rl/src", "packages/windrl-engine/src"]
 
 [tool.ruff.lint]
 extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+# jaxtyping shape strings in annotations ("turbines grid grid", "*shape") trip
+# ruff's forward-ref parser: F821 (undefined name) and F722 (syntax in forward
+# annotation). They are not real errors.
+"packages/windrl-engine/src/**" = ["F722", "F821"]
+
 [tool.mypy]
-mypy_path = ["packages/wind-rl/src"]
+mypy_path = ["packages/wind-rl/src", "packages/windrl-engine/src"]
 plugins = ["pydantic.mypy"]
 strict = true
 disallow_any_generics = true
