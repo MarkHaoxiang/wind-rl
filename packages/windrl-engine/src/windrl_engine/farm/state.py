@@ -10,7 +10,7 @@ from windrl_engine.farm.wind import WindCondition
 class FarmState(NamedTuple):
     yaw: Float[Array, "turbines"]  # absolute deg, [-40, 40]
     yaw_accumulator: Float[Array, "turbines"]  # Σ|applied Δyaw| deg
-    step_count: Int[Array, ""]
+    step_count: Int[Array, ""]  # WFCRL _num_iter; reset burn-in solve is step 1
     wind: WindCondition
     key: Key[Array, ""]
 
@@ -22,7 +22,10 @@ def make_state(
     return FarmState(
         yaw=zeros,
         yaw_accumulator=zeros,
-        step_count=jnp.asarray(0),
+        # WFCRL's reset advances _num_iter 0->1 via a zero-yaw burn-in solve, so the
+        # reset-produced state already counts as step 1 (spec §8); horizon-1 agent
+        # steps follow before truncation.
+        step_count=jnp.asarray(1),
         wind=wind,
         key=key,
     )

@@ -18,12 +18,13 @@ def duty_cycle_limiter(
 ) -> Float[Array, "turbines"]:
     """Zero the raw action of turbines slewing over ``DUTY_FRACTION`` of wall time.
 
-    Spec §4a: ``num_moves`` is incremented (``step_count + 1``) *before* the
-    fraction check; the accumulator holds ``Σ|applied Δyaw|`` from prior steps.
-    Applied to the raw action (before the discrete mapping), so a zeroed
-    discrete action later maps to ``-step`` (WFCRL behaviour, simple_env.py).
+    Spec §4a: WFCRL's ``num_moves`` counts agent steps only (simple_env.py:64,
+    independent of the reset burn-in), so it equals ``step_count`` entering the
+    step now that the reset-produced state starts at 1 (§8); the accumulator holds
+    ``Σ|applied Δyaw|`` from prior steps. Applied to the raw action (before the
+    discrete mapping), so a zeroed discrete action later maps to ``-step``.
     """
-    num_moves = step_count + 1
+    num_moves = step_count
     actuating_frac = accumulator / SLEW_RATE / num_moves / DT
     return jnp.where(actuating_frac >= DUTY_FRACTION, 0.0, action)
 

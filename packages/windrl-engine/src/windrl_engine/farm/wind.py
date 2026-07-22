@@ -13,7 +13,9 @@ class WindCondition(NamedTuple):
 class WindRose(NamedTuple):
     direction_bins: Float[Array, "directions"]  # deg
     speed_bins: Float[Array, "speeds"]  # m/s
-    frequency: Float[Array, "directions speeds"]
+    frequency: Float[
+        Array, "directions speeds"
+    ]  # need not be normalized; consumers renormalize
 
 
 def sample_wind(key: Key[Array, ""]) -> WindCondition:

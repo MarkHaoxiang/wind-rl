@@ -32,7 +32,8 @@ class FlowSolution(NamedTuple):
     turbulence_intensity: Float[Array, "turbines"]
 
 
-def _rotor_plane_x(xc: Float[Array, "turbines"]) -> Float[Array, "turbines"]:
+def rotor_plane_x(xc: Float[Array, "turbines"]) -> Float[Array, "turbines"]:
+    """Rotor-plane streamwise x reproducing FLORIS's np.mean to 1 ULP (spec §5.3)."""
     # x is constant over the rotor plane, so FLORIS's x_i = np.mean of nine identical
     # values, which rounds to x or x+ulp; that one-ulp choice decides the transverse
     # source-plane `delta_x >= 0` gate (spec §5.3). np.mean's pairwise sum is
@@ -66,7 +67,7 @@ def solve_farm(
     yaw_s = yaw[sorted_idx]
     u_initial, dudz_initial = initial_flow(zs, wind.speed)
 
-    x_i_all = _rotor_plane_x(xs[:, 0, 0])
+    x_i_all = rotor_plane_x(xs[:, 0, 0])
     y_i_all = jnp.mean(ys, axis=(1, 2))
     uinf = jnp.mean(u_initial)
     n = xs.shape[0]

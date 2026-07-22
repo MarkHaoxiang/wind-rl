@@ -310,7 +310,11 @@ class BatchedWindFarmEnv:
     def observation_space(self) -> dict[str, Box]:
         return {
             "yaw": Box((self.n_turbines,), -YAW_LIMIT, YAW_LIMIT),
-            "freewind": Box((2,), 0.0, WIND_DIRECTION_MAX),
+            "freewind": Box(
+                (2,),
+                jnp.asarray([0.0, 0.0]),
+                jnp.asarray([WIND_SPEED_MAX, WIND_DIRECTION_MAX]),
+            ),
             "wind_speed": Box((self.n_turbines,), 0.0, WIND_SPEED_MAX),
             "wind_direction": Box((self.n_turbines,), 0.0, WIND_DIRECTION_MAX),
         }

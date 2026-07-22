@@ -18,7 +18,7 @@ from windrl_engine.physics.frame import (
     upstream_order,
     wind_deviation,
 )
-from windrl_engine.physics.solver import _rotor_plane_x, solve_farm
+from windrl_engine.physics.solver import rotor_plane_x, solve_farm
 from windrl_engine.physics.thrust import axial_induction, cubic_mean, effective_ct
 
 PAD_DIAMETERS: Final = 3.0
@@ -52,7 +52,7 @@ def _u_on_plane(
 
     u_initial_turbine, _ = initial_flow(zs, wind.speed)
     uinf_turbine = jnp.mean(u_initial_turbine)
-    x_i_all = _rotor_plane_x(xs[:, 0, 0])
+    x_i_all = rotor_plane_x(xs[:, 0, 0])
     y_i_all = jnp.mean(ys, axis=(1, 2))
 
     u_initial_query, _ = initial_flow(z_query, wind.speed)

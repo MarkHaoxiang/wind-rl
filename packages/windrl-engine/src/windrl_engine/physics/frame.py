@@ -14,6 +14,15 @@ RotorField = Float[Array, "turbines grid grid"]
 RotorPlane = Float[Array, "grid grid"]
 Permutation = Int[Array, "turbines"]
 
+# The wake-field functions (initial_flow / deflection_field / deficit_field) evaluate at
+# arbitrary query points: rotor grids ("turbines grid grid") inside the solve, 2D planes
+# ("res_a res_b") under analysis/flow_viz. `*query` binds either polymorphically and,
+# reused across one signature, still pins those points to a single common shape.
+QueryField = Float[Array, "*query"]
+# Per-turbine turbulence intensity fed to those wake functions: a rotor-plane table
+# ("grid grid") during the solve, collapsed to a scalar ("") in the full-flow viz pass.
+TurbineTI = Float[Array, "*ti"]
+
 
 def cosd(angle: Float[Array, "*shape"]) -> Float[Array, "*shape"]:
     return jnp.cos(jnp.deg2rad(angle))

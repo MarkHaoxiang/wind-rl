@@ -1,13 +1,18 @@
 import dataclasses
 
+from jaxtyping import Array, Float
+
 
 @dataclasses.dataclass(frozen=True)
 class Box:
-    """A bounded float array space (shape excludes any leading batch axis)."""
+    """A bounded float array space (shape excludes any leading batch axis).
+
+    ``low``/``high`` are scalar (broadcast over the space) or per-element arrays.
+    """
 
     shape: tuple[int, ...]
-    low: float
-    high: float
+    low: float | Float[Array, " ..."]
+    high: float | Float[Array, " ..."]
     dtype: str = "float64"
 
 

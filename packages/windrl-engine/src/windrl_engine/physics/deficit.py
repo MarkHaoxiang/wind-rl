@@ -2,19 +2,19 @@ import jax.numpy as jnp
 
 from windrl_engine.farm.turbine import HUB_HEIGHT, D
 from windrl_engine.physics.deflection import ALPHA, BETA, KA, KB
-from windrl_engine.physics.frame import RotorField, RotorPlane, Scalar, cosd
+from windrl_engine.physics.frame import QueryField, Scalar, TurbineTI, cosd
 
 
 def _rc(
-    sigma_y: RotorField,
-    sigma_z: RotorField,
-    y: RotorField,
+    sigma_y: QueryField,
+    sigma_z: QueryField,
+    y: QueryField,
     y_i: Scalar,
-    deflection: RotorField,
-    z: RotorField,
+    deflection: QueryField,
+    z: QueryField,
     ct_i: Scalar,
     yaw: Scalar,
-) -> tuple[RotorField, RotorField]:
+) -> tuple[QueryField, QueryField]:
     a = 1.0 / (2.0 * sigma_y**2)
     c = 1.0 / (2.0 * sigma_z**2)
     r = a * (y - y_i - deflection) ** 2 + c * (z - HUB_HEIGHT) ** 2
@@ -23,17 +23,17 @@ def _rc(
 
 
 def deficit_field(
-    x: RotorField,
-    y: RotorField,
-    z: RotorField,
-    u_initial: RotorField,
-    deflection: RotorField,
+    x: QueryField,
+    y: QueryField,
+    z: QueryField,
+    u_initial: QueryField,
+    deflection: QueryField,
     x_i: Scalar,
     y_i: Scalar,
     ct_i: Scalar,
     yaw_i: Scalar,
-    ti_i: RotorPlane,
-) -> RotorField:
+    ti_i: TurbineTI,
+) -> QueryField:
     """Normalized Gaussian velocity deficit of turbine `i`; near/far computed and masked."""
     yaw = -1.0 * yaw_i
 

@@ -35,8 +35,9 @@ def aep(
     rose: WindRose, powers: Float[Array, "directions speeds turbines"]
 ) -> Float[Array, ""]:
     """Frequency-weighted annual energy production (GWh), assuming an 8760 h/yr calendar."""
+    weights = rose.frequency / rose.frequency.sum()
     farm_power = jnp.sum(powers, axis=-1)
-    expected_power = jnp.sum(rose.frequency * farm_power)
+    expected_power = jnp.sum(weights * farm_power)
     return expected_power * HOURS_PER_YEAR / 1e9
 
 
@@ -53,4 +54,5 @@ def wake_loss(
     reference_power = (
         n_turbines * power_surface(isolated_layout, rose, isolated_yaw)[..., 0]
     )
-    return jnp.sum(rose.frequency * (1.0 - farm_power / reference_power))
+    weights = rose.frequency / rose.frequency.sum()
+    return jnp.sum(weights * (1.0 - farm_power / reference_power))

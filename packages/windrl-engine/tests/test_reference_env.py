@@ -45,8 +45,9 @@ def _random(n: int, step: float):
     return lambda k: rng.uniform(-step, step, n).astype(np.float32)
 
 
-def _drive_wfcrl(env_id, speed, direction, stream, n_steps):
-    env = make(env_id, controls=["yaw"], log=False)
+def _drive_wfcrl(env_id, speed, direction, stream, n_steps, max_num_steps=None):
+    kwargs = {} if max_num_steps is None else {"max_num_steps": max_num_steps}
+    env = make(env_id, controls=["yaw"], log=False, **kwargs)
     n = env.num_turbines
     yaw_step = float(env.controls["yaw"][2])
     load_coef = float(env.load_coef)
@@ -199,6 +200,52 @@ def test_duty_cycle_limiter_fires_and_matches():
             rtol=RTOL,
             atol=ATOL,
             err_msg=f"yaw trajectory diverges at step {i} (limiter parity)",
+        )
+
+
+def test_truncation_boundary_matches_wfcrl():
+    # WFCRL's reset burn-in advances _num_iter to 1, so an episode yields
+    # max_num_steps - 1 agent steps before truncation. The expected boundary is
+    # measured from the live reference, never assumed from our implementation.
+    max_num_steps = 6
+    _ref_reset, deltas, ref_steps, ctrl = _drive_wfcrl(
+        "Turb3_Row1_Floris", 8.0, 270.0, _zeros, max_num_steps, max_num_steps
+    )
+    ref_idx = next((i for i, s in enumerate(ref_steps) if s["truncated"]), None)
+    assert ref_idx is not None, "reference never truncated within the horizon"
+
+    _our_reset, our_steps = _drive_windrl(turb3_row1, 8.0, 270.0, deltas, ctrl)
+    our_idx = next((i for i, s in enumerate(our_steps) if s["truncated"]), None)
+
+    assert our_idx == ref_idx, (
+        f"first-truncation step index mismatch: ours={our_idx}, "
+        f"wfcrl={ref_idx} (max_num_steps={max_num_steps})"
+    )
+    assert (our_idx + 1) == (ref_idx + 1), (
+        f"agent-step count per episode mismatch: ours={our_idx + 1}, "
+        f"wfcrl={ref_idx + 1}"
+    )
+    for i, (ours, ref) in enumerate(zip(our_steps, ref_steps, strict=True)):
+        ctx = f"boundary step {i} (ref truncates at {ref_idx})"
+        np.testing.assert_allclose(
+            ours["yaw"], ref["yaw"], rtol=RTOL, atol=ATOL, err_msg=f"{ctx} yaw"
+        )
+        np.testing.assert_allclose(
+            ours["wind_speed"],
+            ref["wind_speed"],
+            rtol=RTOL,
+            atol=ATOL,
+            err_msg=f"{ctx} wind_speed",
+        )
+        np.testing.assert_allclose(
+            ours["wind_direction"],
+            ref["wind_direction"],
+            rtol=RTOL,
+            atol=ATOL,
+            err_msg=f"{ctx} wind_direction",
+        )
+        np.testing.assert_allclose(
+            ours["reward"], ref["reward"], rtol=RTOL, atol=ATOL, err_msg=f"{ctx} reward"
         )
 
 

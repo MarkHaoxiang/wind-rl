@@ -5,7 +5,13 @@ import jax.numpy as jnp
 
 from windrl_engine.farm.turbine import HUB_HEIGHT, TSR, D
 from windrl_engine.physics.flow import SHEAR
-from windrl_engine.physics.frame import RotorField, RotorPlane, Scalar, cosd
+from windrl_engine.physics.frame import (
+    QueryField,
+    RotorPlane,
+    Scalar,
+    TurbineTI,
+    cosd,
+)
 
 ALPHA: Final = 0.58
 BETA: Final = 0.077
@@ -17,13 +23,13 @@ NUM_EPS: Final = 0.001
 
 
 def deflection_field(
-    x: RotorField,
-    freestream_velocity: RotorField,
+    x: QueryField,
+    freestream_velocity: QueryField,
     x_i: Scalar,
     yaw_i: Scalar,
-    ti_i: RotorPlane,
+    ti_i: TurbineTI,
     ct_i: Scalar,
-) -> RotorField:
+) -> QueryField:
     """Lateral wake-center deflection (m) of turbine `i`, opposite yaw sign convention."""
     yaw = -1.0 * yaw_i
 
