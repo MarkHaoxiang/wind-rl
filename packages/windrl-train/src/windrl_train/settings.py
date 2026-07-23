@@ -1,7 +1,8 @@
 """Process-wide settings, sourced from ``WIND_RL_*`` environment variables.
 
 Replaces DiCoDe's hardcoded ``~/.diffusion_co_design`` working directory with a
-configurable, env-overridable setting.
+configurable, env-overridable setting. The one definition of this contract in
+the repo — ``logging.WandbLogger`` and the experiment frameworks both read it.
 """
 
 from __future__ import annotations

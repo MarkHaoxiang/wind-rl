@@ -1,22 +1,20 @@
 # Architecture
 
-A map of the three packages and how `experiments/` uses them. Dependency
-direction: `windrl-engine` is consumed by both `windrl-train` and `wind-rl`;
-neither of those depends on the other.
+A map of the two packages and how `experiments/` uses them. Dependency
+direction: `windrl-engine` is consumed by `windrl-train`. One uv workspace,
+one py3.12 venv (Mava pins jax==0.5.3 / py<3.13); Mava is installed editable
+from a clone, not declared as a dependency (see `packages/windrl-train/README.md`).
 
 ## Packages
 
-- `packages/windrl-engine`: pure-JAX wind-farm simulator, in the root uv
-  workspace, no torch/wfcrl/FLORIS dependency.
-- `packages/windrl-train`: Mava MAPPO trainer over `windrl-engine`, excluded
-  from the root workspace with its own Python 3.12 / jax 0.5.3 venv (Mava
-  pins conflict with the root py3.13 / jax 0.11 stack).
-- `packages/wind-rl`: experiment harness (sweep/table/verdict machinery,
-  config base, scenario definitions), in the root workspace, torch-free.
-- `experiments/`: numbered frameworks (not single runs) that orchestrate
-  across the packages and assert pass/fail verdicts in code, e.g.
-  `0002_mappo_baseline` shells `subprocess` calls into the `windrl-train`
-  venv per seed.
+- `packages/windrl-engine`: pure-JAX wind-farm simulator, no torch/wfcrl/FLORIS
+  dependency.
+- `packages/windrl-train`: Mava MAPPO trainer over `windrl-engine`, plus the
+  experiment harness (config base, `WIND_RL_*` settings, verdict scoring).
+- `experiments/`: numbered frameworks (not single runs) that orchestrate the
+  packages and assert pass/fail verdicts in code, e.g. `0002_mappo_baseline`
+  runs each seed in a fresh `windrl_train.train` subprocess (Hydra/global-state
+  isolation per run).
 
 ## `windrl-engine`
 
@@ -59,20 +57,15 @@ from a clone (see the package README).
   entrypoint and adds eval-series JSON export.
 - `networks.py`: permutation-equivariant GCN torsos (`network=gcn`) beside
   Mava's default per-agent MLP (`network=mlp`).
-- `logging.py`: wandb backend honoring `WIND_RL_WDIR`/`WIND_RL_WANDB_MODE`
-  (mirrored, not imported — this venv has no `wind_rl`).
+- `logging.py`: wandb backend honoring `WIND_RL_WDIR`/`WIND_RL_WANDB_MODE` via
+  `WindRlSettings`.
 - `configs/`: Hydra composition over Mava's own config groups.
-
-## `wind-rl`
-
-- `experiment/`: `settings.py` (`WindRlSettings`, the `WIND_RL_*` env-var
-  contract), `sweep.py`/`table.py`/`verdict.py` (per-run results ->
-  aggregated table -> pass/fail gates), `cli.py` (shared Hydra glue).
+- `settings.py`: `WindRlSettings`, the one `WIND_RL_*` env-var contract in the
+  repo.
 - `config.py`: `Config`, the pydantic v2 `extra="forbid"` base every typed
-  config extends.
-- `scenario.py`: `ScenarioConfig` — map geometry and control parameters
-  shared across layout-feasibility work.
-- `utils/`: `thread_pinning.py` only.
+  experiment config extends.
+- `verdict.py`: `windowed_delta`, the per-run learning-signal score frameworks
+  gate on.
 
 ## Outputs
 

@@ -26,7 +26,7 @@ def crespo_hernandez(
     upstream_mask = delta_x <= 0.1
     downstream_mask = delta_x > -0.1
     delta_x = delta_x * downstream_mask + upstream_mask
-    ti = (
+    ti: RotorField = (
         CRESPO_CONSTANT
         * a_i**CRESPO_AI
         * AMBIENT_TI**CRESPO_INITIAL

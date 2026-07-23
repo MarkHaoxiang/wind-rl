@@ -1,36 +1,20 @@
 import os
-from pathlib import Path
 from typing import Any
 
 import jax
 from mava.utils.logger import BaseLogger, LogEvent
 
-_WANDB_MODE_ENV = "WIND_RL_WANDB_MODE"
-_WDIR_ENV = "WIND_RL_WDIR"
-_DEFAULT_MODE = "online"
-_DEFAULT_WDIR = "outputs"
-
-
-def _resolved_mode() -> str:
-    mode = os.environ.get(_WANDB_MODE_ENV, _DEFAULT_MODE)
-    if mode not in ("online", "offline", "disabled"):
-        raise ValueError(
-            f"{_WANDB_MODE_ENV} must be online|offline|disabled, got {mode!r}"
-        )
-    return mode
-
-
-def _resolved_dir() -> Path:
-    return Path(os.environ.get(_WDIR_ENV, _DEFAULT_WDIR)).expanduser().resolve()
+from windrl_train.settings import WindRlSettings
 
 
 class WandbLogger(BaseLogger):
     """Weights & Biases backend for Mava's ``MultiLogger``.
 
     Mode and output directory follow the ``WIND_RL_WANDB_MODE`` /
-    ``WIND_RL_WDIR`` env-var contract (mirrored, not imported). The run ``name``
-    must not encode the seed — seeds share a name so wandb's group-by-name shows
-    the seed distribution; the seed lives in ``tags``/``config`` instead.
+    ``WIND_RL_WDIR`` env-var contract via :class:`WindRlSettings`. The run
+    ``name`` must not encode the seed — seeds share a name so wandb's
+    group-by-name shows the seed distribution; the seed lives in
+    ``tags``/``config`` instead.
     """
 
     def __init__(
@@ -48,7 +32,8 @@ class WandbLogger(BaseLogger):
     ) -> None:
         import wandb
 
-        wdir = _resolved_dir()
+        settings = WindRlSettings()
+        wdir = settings.resolved_wdir
         wdir.mkdir(parents=True, exist_ok=True)
         self._run = wandb.init(
             project=project,
@@ -56,7 +41,7 @@ class WandbLogger(BaseLogger):
             name=name,
             group=group,
             tags=[*(tags or []), f"seed_{seed}"],
-            mode=_resolved_mode(),
+            mode=settings.wandb_mode,
             dir=str(wdir),
             reinit=True,
         )

@@ -5,10 +5,10 @@ of related runs sharing machinery, not a single run. Prefer adding a variant
 to an existing framework over scaffolding a new number.
 
 **A new study is a new `conf/` variant set in an existing framework, not a new
-directory — unless the experiment SHAPE is genuinely new.** All shared
-machinery (variant sweeps, comparison tables, verdict gates, wandb handling,
-architecture-benchmark proxies) lives in `wind_rl.experiment`; a framework is
-only a `conf/`, a thin `run.py` of glue, and a `report.md`.
+directory — unless the experiment SHAPE is genuinely new.** Shared machinery
+(the `Config` base, the `WIND_RL_*` settings, verdict scoring) lives in
+`windrl_train`; a framework is only a `conf/`, a thin `run.py` of glue, and a
+`report.md`.
 
 ## Layout
 
@@ -24,7 +24,7 @@ experiments/
 
 ## Anatomy of a framework
 
-- **`run.py`** builds a typed `Config` (the `wind_rl.config.Config` base,
+- **`run.py`** builds a typed `Config` (the `windrl_train.config.Config` base,
   `extra="forbid"`) from `conf/`, then drives the run: collect ->
   designer/policy update -> periodic eval -> checkpoint.
 - **`conf/`** holds config groups; select a variant explicitly rather than
@@ -53,9 +53,9 @@ controlled by `WIND_RL_WANDB_MODE` (plain `WANDB_MODE` is not honoured —
 `WindRlSettings` reads only `WIND_RL_*` variables):
 
 ```bash
-WIND_RL_WANDB_MODE=disabled uv run python experiments/NNNN_slug/run.py   # fast plumbing check, no tracking
-WIND_RL_WANDB_MODE=offline  uv run python experiments/NNNN_slug/run.py   # record locally, `wandb sync` later
-WIND_RL_WANDB_MODE=online   uv run python experiments/NNNN_slug/run.py   # requires `wandb login`
+WIND_RL_WANDB_MODE=disabled uv run --no-sync python experiments/NNNN_slug/run.py   # fast plumbing check, no tracking
+WIND_RL_WANDB_MODE=offline  uv run --no-sync python experiments/NNNN_slug/run.py   # record locally, `wandb sync` later
+WIND_RL_WANDB_MODE=online   uv run --no-sync python experiments/NNNN_slug/run.py   # requires `wandb login`
 ```
 
 ## JOURNAL.md

@@ -1,19 +1,11 @@
 [tool.uv.workspace]
 members = ["packages/*"]
-# windrl-train is version-isolated (Mava pins jax==0.5.3 / py>=3.10,<3.13), which
-# cannot co-resolve with the root py3.13 / jax 0.11 stack. It has its own venv;
-# keep it out of the root workspace resolution entirely.
-exclude = ["packages/windrl-train"]
 
 [tool.uv.sources]
-wind-rl = { workspace = true }
+windrl-engine = { workspace = true }
+windrl-train = { workspace = true }
 
 [dependency-groups]
-# Deliberately does *not* list "wind-rl" here (unlike catan-engine's pattern
-# of listing every workspace member in dev): a virtual workspace's plain
-# `uv sync` already installs every `[tool.uv.workspace]` member regardless of
-# dev-group membership, so `uv run python -c "import wind_rl"` works at root
-# without it.
 dev = [
     "beartype>=0.19",
     # Backs windrl-engine's optional [viz] extra so strict mypy sees real
@@ -22,18 +14,13 @@ dev = [
     "matplotlib>=3.9",
     "mypy>=1.11",
     "pre-commit>=4",
-    "pydantic>=2",
     "pytest>=8",
     "pytest-xdist>=3",
     "ruff>=0.15",
 ]
 
 [tool.ruff]
-# wind_rl now lives under packages/wind-rl/src, not the repo-root `src/` ruff
-# auto-detects by default; without this, isort no longer recognizes `wind_rl`
-# as first-party and re-groups import blocks (moved files must stay
-# byte-identical).
-src = ["packages/wind-rl/src", "packages/windrl-engine/src"]
+src = ["packages/windrl-engine/src", "packages/windrl-train/src"]
 
 [tool.ruff.lint]
 extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
@@ -43,9 +30,10 @@ extend-select = ["I", "B", "UP", "C4", "SIM", "RUF"]
 # ruff's forward-ref parser: F821 (undefined name) and F722 (syntax in forward
 # annotation). They are not real errors.
 "packages/windrl-engine/src/**" = ["F722", "F821"]
+"packages/windrl-train/src/**" = ["F722", "F821"]
 
 [tool.mypy]
-mypy_path = ["packages/wind-rl/src", "packages/windrl-engine/src"]
+mypy_path = ["packages/windrl-engine/src", "packages/windrl-train/src"]
 plugins = ["pydantic.mypy"]
 strict = true
 disallow_any_generics = true
@@ -69,12 +57,34 @@ init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
 
+# Third-party packages that ship little or no typing. Mava and jumanji live in
+# the shared venv now; they have no py.typed, so imports from them are untyped.
 [[tool.mypy.overrides]]
-module = ["wandb.*", "hydra.*", "floris.*"]
+module = ["wandb.*", "hydra.*", "mava.*", "jumanji.*"]
 ignore_missing_imports = true
 
+# The Mava/jumanji-touching trainer modules wrap an untyped framework: strict
+# `disallow_any`/subclassing-Any/explicit-override checks there flag the
+# framework's own type gaps, not our bugs. The experiment surface
+# (config/settings/verdict) stays fully strict.
+[[tool.mypy.overrides]]
+module = [
+    "windrl_train.env",
+    "windrl_train.networks",
+    "windrl_train.train",
+    "windrl_train.logging",
+]
+disallow_any_explicit = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+disallow_subclassing_any = false
+warn_return_any = false
+warn_unreachable = false
+warn_unused_ignores = false
+disable_error_code = ["explicit-override"]
+
 [tool.pytest.ini_options]
-testpaths = ["packages/wind-rl/tests", "packages/windrl-engine/tests"]
+testpaths = ["packages/windrl-engine/tests", "packages/windrl-train/tests"]
 addopts = "-q"
 markers = [
     "slow: long-running (large sample counts, many env steps); excluded from quick local runs on request only, not from CI by default",

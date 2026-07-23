@@ -1,9 +1,9 @@
 """M1 MAPPO baseline framework: Mava FF-MAPPO on a fixed windrl-engine layout.
 
-Training runs inside the version-isolated ``windrl-train`` venv (py3.12 / jax
-0.5.3 / Mava), which this py3.13 orchestrator shells out to; the eval trajectory
-is read back from a metrics JSON the trainer writes (``WINDRL_TRAIN_METRICS_PATH``).
-The zero-yaw baseline is computed here directly with a ``windrl_engine`` rollout.
+Each seed trains in a fresh ``windrl_train.train`` subprocess (Hydra/global-state
+isolation per run); the eval trajectory is read back from a metrics JSON the
+trainer writes (``WINDRL_TRAIN_METRICS_PATH``). The zero-yaw baseline is computed
+here directly with a ``windrl_engine`` rollout.
 
 Verdict (asserted below, per seed, every seed must clear both gates):
   * learning   -- trained best-policy return >= early-window return * learning_ratio
@@ -23,18 +23,17 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 
-from wind_rl.config import Config
-from wind_rl.experiment.settings import WindRlSettings
-from wind_rl.experiment.verdict import windowed_delta
 from windrl_engine.env.config import WindFarmEnvConfig
 from windrl_engine.env.env import reset as core_reset
 from windrl_engine.env.env import step as core_step
 from windrl_engine.farm.wind import WindCondition
+from windrl_train.config import Config
+from windrl_train.settings import WindRlSettings
+from windrl_train.verdict import windowed_delta
 
 FRAMEWORK = "0002_mappo_baseline"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONF_DIR = Path(__file__).resolve().parent / "conf"
-TRAIN_PYTHON = REPO_ROOT / "packages" / "windrl-train" / ".venv" / "bin" / "python"
 
 
 class FixedWind(Config):
@@ -174,18 +173,15 @@ def _overrides(conf: ExperimentConf, seed: int, run_dir: Path) -> list[str]:
 
 
 def train_seed(conf: ExperimentConf, seed: int, metrics_path: Path) -> MetricsFile:
-    if not TRAIN_PYTHON.exists():
-        raise FileNotFoundError(
-            f"windrl-train venv interpreter missing at {TRAIN_PYTHON}. "
-            "Create it per packages/windrl-train/README.md before running this framework."
-        )
     child_env = dict(os.environ)
     child_env["WINDRL_TRAIN_METRICS_PATH"] = str(metrics_path)
     child_env.setdefault("JAX_PLATFORMS", "cpu")
     run_dir = metrics_path.parent / f"hydra_{metrics_path.stem}"
+    # Subprocess-per-seed (not in-process) isolates Hydra + Mava global state
+    # between runs; one repo venv now, so the current interpreter is the trainer.
     subprocess.run(
         [
-            str(TRAIN_PYTHON),
+            sys.executable,
             "-m",
             "windrl_train.train",
             *_overrides(conf, seed, run_dir),
