@@ -75,7 +75,7 @@ def project_feasible(
     not_self = ~jnp.eye(n, dtype=bool)
     target = site.min_spacing * (1.0 + tol)
 
-    def step(_: int, c: Float[Array, "turbines 2"]) -> Float[Array, "turbines 2"]:
+    def step(_: Array, c: Float[Array, "turbines 2"]) -> Float[Array, "turbines 2"]:
         diff = c[:, None, :] - c[None, :, :]  # (N, N, 2), pos_i - pos_j
         dist = jnp.sqrt(jnp.sum(diff * diff, axis=-1))  # (N, N)
         safe_dist = jnp.where(dist > 0.0, dist, 1.0)
