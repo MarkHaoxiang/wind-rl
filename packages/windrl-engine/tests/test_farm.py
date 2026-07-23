@@ -1,4 +1,4 @@
-"""farm/ is fully implemented (design doc §"Package tree"); these run now."""
+"""farm/ is fully implemented; these run now."""
 
 import math
 
@@ -25,8 +25,8 @@ N_WIND_SAMPLES = 20_000
 
 
 def _wind_samples() -> tuple[jax.Array, jax.Array]:
-    # `Key[Array, ""]` (design doc's fixed signature) is a scalar typed key,
-    # i.e. `jax.random.key(...)`, not the legacy `uint32[2]` PRNGKey array.
+    # `Key[Array, ""]` is a scalar typed key, i.e. `jax.random.key(...)`, not
+    # the legacy `uint32[2]` PRNGKey array.
     keys = jax.random.split(jax.random.key(0), N_WIND_SAMPLES)
     speed, direction = jax.vmap(sample_wind)(keys)
     return speed, direction

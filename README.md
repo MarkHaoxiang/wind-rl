@@ -22,7 +22,6 @@ packages/
   wfcrl-env/            # git submodule: the author's WFCRL fork, consumed as a library
 experiments/           # numbered experiment frameworks (see experiments/README.md)
 docs/
-  plans/               # architecture & research plans (owner-reviewed)
   research/            # research notes (owner-reviewed)
 ```
 
@@ -36,8 +35,3 @@ uv run pre-commit install
 ```
 
 Checks (also run in CI): see `CLAUDE.md`'s Checks section.
-
-## Documentation
-
-See `docs/plans/2026-07-19-wind-rl-architecture.md` for the project's
-architecture plan, milestone roadmap, and owner decisions.

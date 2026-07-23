@@ -1,8 +1,8 @@
 """Turn the physics/farm modules' jaxtyping annotations into enforced runtime checks.
 
-The single-farm core (``farm/*`` and ``physics/*``) is annotated with the
-un-batched shape aliases from the design doc's fixed signatures (``"turbines"``,
-``"turbines grid grid"``, ...). Installing jaxtyping's import hook (backed by
+The single-farm core (``farm/*`` and ``physics/*``) is annotated with
+un-batched shape aliases (``"turbines"``, ``"turbines grid grid"``, ...).
+Installing jaxtyping's import hook (backed by
 beartype) here makes those annotations *checked* during the test run -- every
 call, and every ``jax.jit`` trace, verifies shapes and dtypes -- at zero cost to
 the shipped package (the hook only exists in the test session).
@@ -14,14 +14,13 @@ test module.
 ``env`` / ``analysis`` are intentionally excluded: their per-turbine
 annotations are the same un-batched aliases but execute batched under
 ``vmap`` (``BatchedWindFarmEnv``, rose evaluation), so enforcing them needs a
-separate batched -> single-farm re-annotation pass first (see design doc
-decision 3).
+separate batched -> single-farm re-annotation pass first.
 """
 
 import jax
 from jaxtyping import install_import_hook
 
-# The wake solve requires float64 for reference agreement (step spec §9); farm
+# The wake solve requires float64 for reference agreement; farm
 # tables and layouts are built at import time, so this must run before any of
 # the hooked modules (or their dependents) are first imported.
 jax.config.update("jax_enable_x64", True)  # type: ignore[no-untyped-call]

@@ -68,6 +68,5 @@ rewrite past entries.
 
 ## Planned frameworks
 
-See `docs/plans/2026-07-19-wind-rl-architecture.md` (milestone roadmap) and
-`docs/research/2026-07-19-geometric-architectures.md` (staged architecture
-path and promotion gates) for what's planned.
+See `docs/research/2026-07-19-geometric-architectures.md` for the staged
+architecture path and promotion gates.

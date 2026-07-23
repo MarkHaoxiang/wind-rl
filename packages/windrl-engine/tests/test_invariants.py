@@ -1,4 +1,4 @@
-"""physics/ invariant tests (design doc "Testing strategy"), CI-safe (no wfcrl)."""
+"""physics/ invariant tests, CI-safe (no wfcrl)."""
 
 import jax
 import jax.numpy as jnp

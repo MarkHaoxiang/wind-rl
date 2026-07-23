@@ -20,9 +20,8 @@ return to `WINDRL_TRAIN_METRICS_PATH` (a JSON under `WIND_RL_WDIR`), which
 On `turb3_row1` (3 turbines, 4D-spaced row, continuous yaw, fixed layout) MAPPO
 learns a steering policy whose farm power strictly exceeds the zero-yaw
 ("do-nothing") baseline, and does so measurably over training. This is the M1
-exit criterion from the architecture plan (T3 leftover: "an experiments-framework
-run with an asserted power-increase threshold"). Ties to C1 (the stack learns
-wake steering at all).
+exit criterion: an experiments-framework run with an asserted power-increase
+threshold, evidence the stack learns wake steering at all.
 
 ## Setup
 

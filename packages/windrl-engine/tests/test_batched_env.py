@@ -1,10 +1,10 @@
 """BatchedWindFarmEnv: batching, per-lane PRNG, auto-reset, rollout, control modes.
 
-Design doc decision #8 (multi-agent = the turbine axis) and the "env" package
-tree entry (`jit(vmap(...))` surface, device-side auto-reset, `lax.scan`
-rollout) are the spec for this file; expectations are cross-checked against
-the single-farm functional core (`reset`/`step`), never against the batched
-implementation's own internals.
+BatchedWindFarmEnv treats the turbine axis as the multi-agent axis, exposed
+via a `jit(vmap(...))` surface with device-side auto-reset and `lax.scan`
+rollout; expectations here are cross-checked against the single-farm
+functional core (`reset`/`step`), never against the batched implementation's
+own internals.
 """
 
 import jax
