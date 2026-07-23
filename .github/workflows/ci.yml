@@ -18,30 +18,19 @@ jobs:
         with:
           enable-cache: true
 
-      # A full `uv sync` would pull torch from the CUDA index (multi-GB wheels),
-      # so CI installs sequentially instead: dev tooling, then a CPU torch, then
-      # the pure-Python runtime deps mypy/pytest actually import. This keeps
-      # local resolution untouched (no pyproject/uv.lock change).
-      #
-      # Version-skew note: the CPU index may serve a torch/tensordict slightly
-      # newer than uv.lock's CUDA pin (torchrl's range still resolves a
-      # satisfying build). CI therefore validates against a near-but-not-lock
-      # CPU stack; the locked CUDA stack is exercised locally / in pre-commit.
+      # wind-rl is pure-Python now (torch left with generative/design, deleted
+      # pending rewrite), so CI installs sequentially only to keep `uv sync
+      # --only-dev` light and to stage windrl-engine's CPU jax below -- there's
+      # no CUDA wheel to dodge anymore. This keeps local resolution untouched
+      # (no pyproject/uv.lock change).
       - name: Install dev tooling (ruff, mypy, pytest)
         run: uv sync --only-dev
 
-      - name: Install CPU torch
-        run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-      # torch stays: wind_rl.generative (SLSQP feasibility projection) and
-      # wind_rl.utils import it directly now that the torchrl RL stack is gone.
       - name: Install pure-Python runtime deps
         run: >-
           uv pip install
-          "hydra-core>=1.3.4" "matplotlib>=3.10.8" "numpy>=2.4.4"
-          "omegaconf>=2.3.1" "pydantic>=2"
-          "pydantic-settings>=2.14.2" "scipy>=1.14"
-          "tqdm>=4.69.0" "wandb[media]>=0.28.1"
+          "hydra-core>=1.3.4" "omegaconf>=2.3.1" "pydantic>=2"
+          "pydantic-settings>=2.14.2" "wandb[media]>=0.28.1"
 
       - name: Install wind-rl (editable, no deps)
         run: uv pip install --no-deps -e packages/wind-rl

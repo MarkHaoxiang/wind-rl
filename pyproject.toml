@@ -6,33 +6,20 @@ members = ["packages/*"]
 exclude = ["packages/windrl-train"]
 
 [tool.uv.sources]
-torch = [
-  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
 wind-rl = { workspace = true }
-
-# torch is pinned to the CUDA 13.0 wheels on linux/win (see the source above);
-# `explicit = true` keeps this index off every other package's resolution.
-# wind-rl now depends on torch directly (it left the graph with the torchrl RL
-# stack but generative/utils still import it), which is what makes this index
-# declaration load-bearing rather than latent.
-[[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
-explicit = true
 
 [dependency-groups]
 # Deliberately does *not* list "wind-rl" here (unlike catan-engine's pattern
 # of listing every workspace member in dev): a virtual workspace's plain
 # `uv sync` already installs every `[tool.uv.workspace]` member regardless of
 # dev-group membership, so `uv run python -c "import wind_rl"` works at root
-# without it. Listing it would instead make CI's `uv sync --only-dev` step (see
-# ci.yml) pull wind-rl's full dependency closure -- including cu130 torch --
-# defeating the staged CPU-torch install CI relies on. Verified empirically:
-# `--only-dev` with wind-rl omitted here installs tooling only; with it added,
-# torch+CUDA wheels come along.
+# without it.
 dev = [
     "beartype>=0.19",
+    # Backs windrl-engine's optional [viz] extra so strict mypy sees real
+    # matplotlib types for analysis/plots.py; runtime consumers opt in via the
+    # extra instead.
+    "matplotlib>=3.9",
     "mypy>=1.11",
     "pre-commit>=4",
     "pydantic>=2",
@@ -83,7 +70,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["wandb.*", "hydra.*", "matplotlib.*", "scipy.*", "tqdm.*", "floris.*"]
+module = ["wandb.*", "hydra.*", "floris.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
