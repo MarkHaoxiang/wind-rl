@@ -30,9 +30,16 @@ From the repo root:
 uv venv --python 3.12 packages/windrl-train/.venv
 VENV=$(pwd)/packages/windrl-train/.venv
 
-# 2. Install Mava (pinned git SHA), the engine, and this package.
-VIRTUAL_ENV=$VENV uv pip install --python $VENV/bin/python \
-  "mava @ git+https://github.com/instadeepai/Mava.git@e1cc61dd0d3a5e02cab126cfb46ddcb7c32a5fdf"
+# 2. Install Mava editable from a clone at the pinned SHA. (A PEP 508
+#    "mava @ git+..." dependency does not work: the distro name is id-mava,
+#    and a non-editable git wheel drops mava/configs, breaking Hydra's
+#    pkg://mava.configs searchpath. Editable-from-clone is Mava's own
+#    documented install path.)
+git clone https://github.com/instadeepai/Mava.git /tmp/mava-checkout
+git -C /tmp/mava-checkout checkout e1cc61dd0d3a5e02cab126cfb46ddcb7c32a5fdf
+VIRTUAL_ENV=$VENV uv pip install --python $VENV/bin/python -e /tmp/mava-checkout
+
+# 3. Install the engine and this package.
 VIRTUAL_ENV=$VENV uv pip install --python $VENV/bin/python -e packages/windrl-engine
 VIRTUAL_ENV=$VENV uv pip install --python $VENV/bin/python --no-deps -e packages/windrl-train
 ```

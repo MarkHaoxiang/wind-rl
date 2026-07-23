@@ -94,3 +94,85 @@ jobs:
       # whole suite runs on CI unfiltered.
       - name: Pytest
         run: uv run --no-sync pytest -q
+
+  # windrl-train (Mava MAPPO on the windrl-engine JAX farm) is workspace-EXCLUDED:
+  # Mava pins jax==0.5.3 and python<3.13, incompatible with the root py3.13/jax0.11
+  # resolution (see packages/windrl-train/README.md). This job builds windrl-train's
+  # own py3.12 venv from scratch and independently exercises it, so it doesn't
+  # `needs: checks` and doesn't touch that job's environment.
+  #
+  # The README's documented `uv pip install "mava @ git+...@<sha>"` no longer works
+  # and is NOT reproduced here -- verified locally (2026-07-23) against uv 0.11.28:
+  #   1. Mava's actual distribution name is `id-mava` (pyproject `[project].name`),
+  #      not `mava`; uv now enforces the PEP 508 name against build metadata and
+  #      hard-fails on the mismatch.
+  #   2. Even renamed to `id-mava @ git+...`, a non-editable wheel build drops
+  #      `mava/configs/` (no `__init__.py`, so `setuptools.packages.find` never
+  #      picks it up, and there's no package-data/MANIFEST include for it) --
+  #      Hydra's `pkg://mava.configs` searchpath then can't find e.g. `network/mlp`
+  #      and every run fails before training starts.
+  # The fix that actually works, matching Mava's own upstream-recommended
+  # clone-and-dev-install workflow: `git clone` + checkout the pinned SHA, then
+  # `uv pip install -e <clone>` (editable keeps `mava.__path__` pointing at the
+  # checkout, so the configs directory is found on disk instead of needing to be
+  # packaged). Report this drift upstream to the README rather than re-deriving it.
+  train-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Create windrl-train venv (Python 3.12)
+        run: uv venv --python 3.12 packages/windrl-train/.venv
+
+      # Mava is GitHub-only and never released to PyPI as the JAX system (the
+      # `mava` name on PyPI is an unrelated, long-dead TF/Acme project); pin the
+      # same commit as packages/windrl-train/pyproject.toml. This clone (~10s) is
+      # the only part the uv cache doesn't cover -- the uv wheel/build cache below
+      # (enable-cache above) covers Mava's ~150-package dependency closure
+      # (jax/jaxlib, flax, mujoco, brax, tensorflow-probability, ...), which is
+      # the actually slow part on a cold cache.
+      - name: Clone Mava (pinned SHA)
+        run: |
+          git clone --quiet https://github.com/instadeepai/Mava.git "$RUNNER_TEMP/mava-src"
+          git -C "$RUNNER_TEMP/mava-src" checkout --quiet e1cc61dd0d3a5e02cab126cfb46ddcb7c32a5fdf
+
+      - name: Install Mava (editable, pinned SHA)
+        run: uv pip install --python packages/windrl-train/.venv/bin/python -e "$RUNNER_TEMP/mava-src"
+
+      - name: Install windrl-engine
+        run: uv pip install --python packages/windrl-train/.venv/bin/python -e packages/windrl-engine
+
+      - name: Install windrl-train (editable, no deps)
+        run: uv pip install --python packages/windrl-train/.venv/bin/python --no-deps -e packages/windrl-train
+
+      - name: Import smoke
+        timeout-minutes: 3
+        run: >-
+          JAX_PLATFORMS=cpu packages/windrl-train/.venv/bin/python -c
+          "import windrl_train, windrl_train.env, windrl_train.train"
+
+      # Smallest override set that still exercises one full PPO update + one eval
+      # pass: 2 envs x 32-step rollout = 64 steps/update, 2 updates (Mava asserts
+      # num_updates > num_evaluation), 1 eval episode, absolute_metric off (its
+      # default final eval alone runs 320 episodes). Measured locally (cold venv,
+      # warm uv cache): ~10s install + ~10s import + ~12s run, ~31s total wall
+      # time; a genuinely first-ever CI run (empty uv cache) will take longer
+      # while it downloads Mava's dependency closure. Logging is Mava's default
+      # console logger only (neptune/json/tensorboard default to disabled).
+      - name: Micro MAPPO training run (turb3_row1)
+        timeout-minutes: 5
+        run: >-
+          JAX_PLATFORMS=cpu packages/windrl-train/.venv/bin/python -m windrl_train.train
+          env.kwargs.layout=turb3_row1 env.kwargs.horizon=50
+          arch.num_envs=2 system.update_batch_size=1 system.rollout_length=32
+          system.num_updates=2 system.num_minibatches=1
+          arch.num_evaluation=1 arch.num_eval_episodes=1 arch.absolute_metric=False

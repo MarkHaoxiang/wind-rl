@@ -10,8 +10,11 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "windrl-engine",
-    # Mava is GitHub-only (never released to PyPI as the JAX system); pin a SHA.
-    "mava @ git+https://github.com/instadeepai/Mava.git@e1cc61dd0d3a5e02cab126cfb46ddcb7c32a5fdf",
+    # Mava is deliberately NOT declared here: its distribution name is id-mava
+    # (a PEP 508 "mava @ git+..." spec hard-fails), and a non-editable git wheel
+    # drops mava/configs (no __init__.py), breaking Hydra's pkg://mava.configs.
+    # Install it editable from a clone at the pinned SHA — see README / the CI
+    # train-smoke job. Pinned SHA: e1cc61dd0d3a5e02cab126cfb46ddcb7c32a5fdf
 ]
 
 [build-system]
