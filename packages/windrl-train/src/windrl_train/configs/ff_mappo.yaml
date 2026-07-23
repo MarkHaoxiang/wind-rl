@@ -1,0 +1,14 @@
+# FF-MAPPO on the windrl-engine wind farm. Composes Mava's own logger/arch/
+# system/network groups (resolved from the installed `mava` package via the
+# namespace-package search path below) with our local `env/windfarm` group.
+defaults:
+  - logger: logger
+  - arch: anakin
+  - system: ppo/ff_mappo
+  - network: mlp
+  - env: windfarm
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://mava.configs

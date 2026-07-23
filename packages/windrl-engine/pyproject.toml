@@ -5,9 +5,9 @@ description = "JAX wind-farm simulator (WFCRL/FLORIS GCH reimplementation)"
 authors = [
     { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
-    "jax>=0.7",
+    "jax>=0.5.3",
     "jaxtyping>=0.3.10",
     "pydantic>=2",
 ]

@@ -2446,7 +2446,7 @@ viz = [
 
 [package.metadata]
 requires-dist = [
-    { name = "jax", specifier = ">=0.7" },
+    { name = "jax", specifier = ">=0.5.3" },
     { name = "jaxtyping", specifier = ">=0.3.10" },
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.9" },
     { name = "pydantic", specifier = ">=2" },

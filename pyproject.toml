@@ -1,5 +1,9 @@
 [tool.uv.workspace]
 members = ["packages/*"]
+# windrl-train is version-isolated (Mava pins jax==0.5.3 / py>=3.10,<3.13), which
+# cannot co-resolve with the root py3.13 / jax 0.11 stack. It has its own venv;
+# keep it out of the root workspace resolution entirely.
+exclude = ["packages/windrl-train"]
 
 [tool.uv.sources]
 torch = [

@@ -1,0 +1,34 @@
+[project]
+name = "windrl-train"
+version = "0.1.0"
+description = "Mava MAPPO training on the windrl-engine JAX wind farm (version-isolated: jax 0.5.3 / py3.12)"
+authors = [
+    { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
+]
+# Isolated from the root workspace (py3.13 / jax 0.11): Mava pins jax==0.5.3 and
+# python >=3.10,<3.13. See README for why this package has its own venv.
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "windrl-engine",
+    # Mava is GitHub-only (never released to PyPI as the JAX system); pin a SHA.
+    "mava @ git+https://github.com/instadeepai/Mava.git@e1cc61dd0d3a5e02cab126cfb46ddcb7c32a5fdf",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/windrl_train"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+# Type-checking runs inside this package's own venv (Mava + jumanji live only
+# there, not in the root py3.13 venv). Non-strict: Mava/jumanji ship little typing.
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+[[tool.mypy.overrides]]
+module = ["mava.*", "jumanji.*", "windrl_engine.*"]
+ignore_missing_imports = true
