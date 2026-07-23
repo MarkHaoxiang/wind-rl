@@ -185,12 +185,17 @@ def _batched_step(
     horizon: int,
     control_mode: ControlMode,
     fidelity: Fidelity,
+    per_env_layout: bool,
 ) -> _StepOut:
+    # A lane's layout is fixed between explicit resets: it is threaded (not stored
+    # in FarmState) so auto-reset resamples wind while keeping the lane's layout.
+    layout_axis = 0 if per_env_layout else None
+
     def one(
-        st: FarmState, act: Float[Array, "turbines"]
+        lay: FarmLayout, st: FarmState, act: Float[Array, "turbines"]
     ) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
         return _step_core(
-            layout,
+            lay,
             st,
             act,
             yaw_step=yaw_step,
@@ -201,7 +206,9 @@ def _batched_step(
             turbine=turbine,
         )
 
-    new_state, obs, reward, truncated = jax.vmap(one)(state, actions)
+    new_state, obs, reward, truncated = jax.vmap(one, in_axes=(layout_axis, 0, 0))(
+        layout, state, actions
+    )
     key, reset_key = jax.random.split(key)
 
     def do_reset(
@@ -210,8 +217,9 @@ def _batched_step(
         st, ob = operand
         keys = jax.random.split(reset_key, truncated.shape[0])
         fresh_state, fresh_obs = jax.vmap(
-            lambda k: reset(layout, k, fidelity=fidelity, turbine=turbine)
-        )(keys)
+            lambda lay, k: reset(lay, k, fidelity=fidelity, turbine=turbine),
+            in_axes=(layout_axis, 0),
+        )(layout, keys)
         return _tree_where_lane(truncated, (fresh_state, fresh_obs), (st, ob))
 
     def no_reset(
@@ -232,10 +240,13 @@ def _batched_reset(
     turbine: TurbineSpec,
     *,
     fidelity: Fidelity,
+    per_env_layout: bool,
 ) -> tuple[FarmState, Observation]:
-    return jax.vmap(lambda k: reset(layout, k, fidelity=fidelity, turbine=turbine))(
-        keys
-    )
+    layout_axis = 0 if per_env_layout else None
+    return jax.vmap(
+        lambda lay, k: reset(lay, k, fidelity=fidelity, turbine=turbine),
+        in_axes=(layout_axis, 0),
+    )(layout, keys)
 
 
 _STEP_STATIC: Final = ("yaw_step", "load_coef", "horizon", "control_mode", "fidelity")
@@ -250,12 +261,14 @@ class _StepStatics(TypedDict):
 
 
 class BatchedWindFarmEnv:
-    """A batch of shared-layout wind farms behind a jointly-stepped parallel API.
+    """A batch of wind farms behind a jointly-stepped parallel API.
 
     Multi-agent view (design #8): the turbine axis *is* the agent axis, so
     observations are per-turbine ``(envs, turbines)`` and the scalar reward is
     broadcast per turbine by the consumer. Terminated lanes auto-reset on device
-    with freshly sampled wind.
+    with freshly sampled wind. Co-design seam: ``reset`` accepts optional per-env
+    ``layouts`` (leading ``(envs,)`` axis) so each lane can solve its own layout,
+    fixed between explicit resets; default shared-layout behavior is unchanged.
     """
 
     def __init__(self, config: WindFarmEnvConfig) -> None:
@@ -270,11 +283,13 @@ class BatchedWindFarmEnv:
         self.fidelity = config.fidelity
         self.turbine = config.build_turbine()
         self._reset_jit = jax.jit(
-            functools.partial(_batched_reset, fidelity=self.fidelity)
+            _batched_reset, static_argnames=("fidelity", "per_env_layout")
         )
         self._step_jit = jax.jit(
-            functools.partial(_batched_step, **self._step_kwargs()),
+            _batched_step, static_argnames=(*_STEP_STATIC, "per_env_layout")
         )
+        self._active_layout: FarmLayout = self.layout
+        self._per_env_layout: bool = False
         self._state: FarmState | None = None
         self._obs: Observation | None = None
         self._key: Key[Array, ""] = jax.random.key(0)
@@ -288,15 +303,41 @@ class BatchedWindFarmEnv:
             "fidelity": self.fidelity,
         }
 
-    def reset(self, key: Key[Array, ""]) -> Observation:
+    def reset(
+        self, key: Key[Array, ""], layouts: FarmLayout | None = None
+    ) -> Observation:
+        """Reset every lane; ``layouts`` (leading ``(envs,)`` axis) gives each lane
+        its own layout, else the shared config layout is used for all lanes."""
+        if layouts is None:
+            self._active_layout, self._per_env_layout = self.layout, False
+        else:
+            self._active_layout, self._per_env_layout = (
+                self._validate_layouts(layouts),
+                True,
+            )
         key, self._key = jax.random.split(key)
         keys = jax.random.split(key, self.n_envs)
         state, obs = cast(
             tuple[FarmState, Observation],
-            self._reset_jit(self.layout, keys, self.turbine),
+            self._reset_jit(
+                self._active_layout,
+                keys,
+                self.turbine,
+                fidelity=self.fidelity,
+                per_env_layout=self._per_env_layout,
+            ),
         )
         self._state, self._obs = state, obs
         return obs
+
+    def _validate_layouts(self, layouts: FarmLayout) -> FarmLayout:
+        if layouts.x.shape != (self.n_envs, self.n_turbines):
+            raise ValueError(
+                "per-env layouts must have shape "
+                f"(n_envs={self.n_envs}, n_turbines={self.n_turbines}), got "
+                f"{tuple(layouts.x.shape)}"
+            )
+        return layouts
 
     def step(
         self, actions: Float[Array, "envs turbines"]
@@ -306,7 +347,15 @@ class BatchedWindFarmEnv:
         self._key, step_key = jax.random.split(self._key)
         out = cast(
             _StepOut,
-            self._step_jit(self.layout, self._state, actions, step_key, self.turbine),
+            self._step_jit(
+                self._active_layout,
+                self._state,
+                actions,
+                step_key,
+                self.turbine,
+                per_env_layout=self._per_env_layout,
+                **self._step_kwargs(),
+            ),
         )
         self._state, self._obs = out.state, out.obs
         return out.obs, out.reward, out.truncated
@@ -330,7 +379,7 @@ class BatchedWindFarmEnv:
         state, obs, rewards = cast(
             tuple[FarmState, Observation, Float[Array, "steps envs"]],
             _rollout_core(
-                self.layout,
+                self._active_layout,
                 self._state,
                 self._obs,
                 scan_key,
@@ -338,6 +387,7 @@ class BatchedWindFarmEnv:
                 actor,
                 self.n_turbines,
                 self.turbine,
+                per_env_layout=self._per_env_layout,
                 **self._step_kwargs(),
             ),
         )
@@ -363,7 +413,14 @@ class BatchedWindFarmEnv:
 
 
 @functools.partial(
-    jax.jit, static_argnames=(*_STEP_STATIC, "n_steps", "n_turbines", "actor")
+    jax.jit,
+    static_argnames=(
+        *_STEP_STATIC,
+        "n_steps",
+        "n_turbines",
+        "actor",
+        "per_env_layout",
+    ),
 )
 def _rollout_core(
     layout: FarmLayout,
@@ -380,6 +437,7 @@ def _rollout_core(
     horizon: int,
     control_mode: ControlMode,
     fidelity: Fidelity,
+    per_env_layout: bool,
 ) -> tuple[FarmState, Observation, Float[Array, "steps envs"]]:
     n_envs = state.step_count.shape[0]
     idle = 1.0 if control_mode == "discrete" else 0.0
@@ -402,6 +460,7 @@ def _rollout_core(
             horizon=horizon,
             control_mode=control_mode,
             fidelity=fidelity,
+            per_env_layout=per_env_layout,
         )
         return (out.state, out.obs, out.key, sample_key), out.reward
 

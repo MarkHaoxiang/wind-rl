@@ -195,7 +195,10 @@ def step(
 ```
 
 `BatchedWindFarmEnv` wraps these with `jit(vmap(...))` over a leading `envs`
-axis (shared layout; per-env state), constructed from `WindFarmEnvConfig`.
+axis, constructed from `WindFarmEnvConfig`; `reset(key, layouts=None)` accepts
+optional per-env layouts (leading `(envs,)` axis) so each lane solves its own
+co-design layout — fixed between explicit resets — with the shared config
+layout as the default (vmap `in_axes` switches layout None→0, jit specializes).
 `analysis.metrics` vmaps `solve_farm` over a `conditions` axis for rose
 evaluation.
 

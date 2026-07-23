@@ -33,7 +33,8 @@ class WindFarmEnvConfig(BaseModel):
 
     ``layout`` is a named reference or explicit ``(x, y)`` coordinates (meters,
     world frame). Validated once at env construction and converted to static
-    jit args + arrays; pydantic objects never enter jitted code.
+    jit args + arrays; pydantic objects never enter jitted code. It is the
+    shared default only: per-env co-design layouts arrive at ``reset``, not here.
     """
 
     model_config = ConfigDict(extra="forbid")
