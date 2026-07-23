@@ -25,14 +25,19 @@ def plot_layout(
     x = np.asarray(layout.x)
     y = np.asarray(layout.y)
     ax.scatter(x, y, s=10, color="tab:blue", zorder=3)
-    for i, (xi, yi) in enumerate(zip(x, y, strict=True)):
+    for i, (turbine_x, turbine_y) in enumerate(zip(x, y, strict=True)):
         ax.add_patch(
             Circle(
-                (xi, yi), radius=rotor_diameter / 2, fill=False, edgecolor="tab:blue"
+                (turbine_x, turbine_y),
+                radius=rotor_diameter / 2,
+                fill=False,
+                edgecolor="tab:blue",
             )
         )
         if show_labels:
-            ax.annotate(str(i), (xi, yi), ha="center", va="center", fontsize=8)
+            ax.annotate(
+                str(i), (turbine_x, turbine_y), ha="center", va="center", fontsize=8
+            )
     margin = rotor_diameter
     ax.set_xlim(x.min() - margin, x.max() + margin)
     ax.set_ylim(y.min() - margin, y.max() + margin)

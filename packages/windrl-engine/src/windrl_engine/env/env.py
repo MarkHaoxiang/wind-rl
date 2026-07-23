@@ -145,24 +145,34 @@ def step(
 Actor = Callable[[Key[Array, ""], Observation], Float[Array, "envs turbines"]]
 
 
-def _where_lane(mask: Bool[Array, "envs"], a: Array, b: Array) -> Array:
-    m = mask.reshape((mask.shape[0],) + (1,) * (a.ndim - 1))
-    return jnp.where(m, a, b)
+def _where_lane(
+    mask: Bool[Array, "envs"], true_value: Array, false_value: Array
+) -> Array:
+    mask_broadcast = mask.reshape((mask.shape[0],) + (1,) * (true_value.ndim - 1))
+    return jnp.where(mask_broadcast, true_value, false_value)
 
 
-def _select_key(mask: Bool[Array, "envs"], a: Array, b: Array) -> Array:
-    ad, bd = jax.random.key_data(a), jax.random.key_data(b)
-    m = mask.reshape((mask.shape[0],) + (1,) * (ad.ndim - 1))
-    return cast(Array, jax.random.wrap_key_data(jnp.where(m, ad, bd)))
+def _select_key(mask: Bool[Array, "envs"], true_key: Array, false_key: Array) -> Array:
+    true_key_data, false_key_data = (
+        jax.random.key_data(true_key),
+        jax.random.key_data(false_key),
+    )
+    mask_broadcast = mask.reshape((mask.shape[0],) + (1,) * (true_key_data.ndim - 1))
+    return cast(
+        Array,
+        jax.random.wrap_key_data(
+            jnp.where(mask_broadcast, true_key_data, false_key_data)
+        ),
+    )
 
 
-def _tree_where_lane[T](mask: Bool[Array, "envs"], a: T, b: T) -> T:
-    def sel(x: Array, y: Array) -> Array:
-        if jnp.issubdtype(x.dtype, jax.dtypes.prng_key):
-            return _select_key(mask, x, y)
-        return _where_lane(mask, x, y)
+def _tree_where_lane[T](mask: Bool[Array, "envs"], true_tree: T, false_tree: T) -> T:
+    def select_leaf(true_leaf: Array, false_leaf: Array) -> Array:
+        if jnp.issubdtype(true_leaf.dtype, jax.dtypes.prng_key):
+            return _select_key(mask, true_leaf, false_leaf)
+        return _where_lane(mask, true_leaf, false_leaf)
 
-    return cast(T, jax.tree.map(sel, a, b))
+    return cast(T, jax.tree.map(select_leaf, true_tree, false_tree))
 
 
 class _StepOut(NamedTuple):
@@ -191,13 +201,13 @@ def _batched_step(
     # in FarmState) so auto-reset resamples wind while keeping the lane's layout.
     layout_axis = 0 if per_env_layout else None
 
-    def one(
-        lay: FarmLayout, st: FarmState, act: Float[Array, "turbines"]
+    def step_one_farm(
+        layout: FarmLayout, state: FarmState, action: Float[Array, "turbines"]
     ) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
         return _step_core(
-            lay,
-            st,
-            act,
+            layout,
+            state,
+            action,
             yaw_step=yaw_step,
             load_coef=load_coef,
             horizon=horizon,
@@ -206,21 +216,28 @@ def _batched_step(
             turbine=turbine,
         )
 
-    new_state, obs, reward, truncated = jax.vmap(one, in_axes=(layout_axis, 0, 0))(
-        layout, state, actions
-    )
+    new_state, obs, reward, truncated = jax.vmap(
+        step_one_farm, in_axes=(layout_axis, 0, 0)
+    )(layout, state, actions)
     key, reset_key = jax.random.split(key)
 
     def do_reset(
         operand: tuple[FarmState, Observation],
     ) -> tuple[FarmState, Observation]:
-        st, ob = operand
+        current_state, current_obs = operand
+
+        def reset_one_farm(
+            layout: FarmLayout, key: Key[Array, ""]
+        ) -> tuple[FarmState, Observation]:
+            return reset(layout, key, fidelity=fidelity, turbine=turbine)
+
         keys = jax.random.split(reset_key, truncated.shape[0])
-        fresh_state, fresh_obs = jax.vmap(
-            lambda lay, k: reset(lay, k, fidelity=fidelity, turbine=turbine),
-            in_axes=(layout_axis, 0),
-        )(layout, keys)
-        return _tree_where_lane(truncated, (fresh_state, fresh_obs), (st, ob))
+        fresh_state, fresh_obs = jax.vmap(reset_one_farm, in_axes=(layout_axis, 0))(
+            layout, keys
+        )
+        return _tree_where_lane(
+            truncated, (fresh_state, fresh_obs), (current_state, current_obs)
+        )
 
     def no_reset(
         operand: tuple[FarmState, Observation],
@@ -243,10 +260,13 @@ def _batched_reset(
     per_env_layout: bool,
 ) -> tuple[FarmState, Observation]:
     layout_axis = 0 if per_env_layout else None
-    return jax.vmap(
-        lambda lay, k: reset(lay, k, fidelity=fidelity, turbine=turbine),
-        in_axes=(layout_axis, 0),
-    )(layout, keys)
+
+    def reset_one_farm(
+        layout: FarmLayout, key: Key[Array, ""]
+    ) -> tuple[FarmState, Observation]:
+        return reset(layout, key, fidelity=fidelity, turbine=turbine)
+
+    return jax.vmap(reset_one_farm, in_axes=(layout_axis, 0))(layout, keys)
 
 
 _STEP_STATIC: Final = ("yaw_step", "load_coef", "horizon", "control_mode", "fidelity")
@@ -439,13 +459,13 @@ def _rollout_core(
 
     Carry = tuple[FarmState, Observation, Key[Array, ""], Key[Array, ""]]
 
-    def body(carry: Carry, _: None) -> tuple[Carry, Float[Array, "envs"]]:
-        st, ob, env_key, sample_key = carry
-        sample_key, k_act = jax.random.split(sample_key)
-        actions = default_actions if actor is None else actor(k_act, ob)
+    def advance_all_lanes(carry: Carry, _: None) -> tuple[Carry, Float[Array, "envs"]]:
+        state, obs, env_key, sample_key = carry
+        sample_key, action_key = jax.random.split(sample_key)
+        actions = default_actions if actor is None else actor(action_key, obs)
         out = _batched_step(
             layout,
-            st,
+            state,
             actions,
             env_key,
             turbine,
@@ -460,6 +480,6 @@ def _rollout_core(
 
     env_key, sample_key = jax.random.split(key)
     (final_state, final_obs, _, _), rewards = jax.lax.scan(
-        body, (state, obs, env_key, sample_key), None, length=n_steps
+        advance_all_lanes, (state, obs, env_key, sample_key), None, length=n_steps
     )
     return final_state, final_obs, rewards

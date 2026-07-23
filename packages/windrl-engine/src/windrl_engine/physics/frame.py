@@ -43,13 +43,13 @@ def rotate_about(
     x: Float[Array, "*shape"],
     y: Float[Array, "*shape"],
     deviation: Scalar,
-    xc: Scalar,
-    yc: Scalar,
+    x_center: Scalar,
+    y_center: Scalar,
 ) -> tuple[Float[Array, "*shape"], Float[Array, "*shape"]]:
-    dx = x - xc
-    dy = y - yc
-    x_rot = dx * cosd(deviation) - dy * sind(deviation) + xc
-    y_rot = dx * sind(deviation) + dy * cosd(deviation) + yc
+    dx = x - x_center
+    dy = y - y_center
+    x_rot = dx * cosd(deviation) - dy * sind(deviation) + x_center
+    y_rot = dx * sind(deviation) + dy * cosd(deviation) + y_center
     return x_rot, y_rot
 
 
@@ -57,8 +57,8 @@ def rotate_to_wind_frame(
     x: Turbines, y: Turbines, direction: Scalar
 ) -> tuple[Turbines, Turbines]:
     """Rotate world coordinates so flow points in +x (270 deg = wind from west)."""
-    xc, yc = layout_center(x, y)
-    return rotate_about(x, y, wind_deviation(direction), xc, yc)
+    x_center, y_center = layout_center(x, y)
+    return rotate_about(x, y, wind_deviation(direction), x_center, y_center)
 
 
 def rotor_grid(

@@ -96,7 +96,7 @@ def wake_added_yaw(
     v_i: RotorPlane,
     delta_y_i: RotorPlane,
     z_i: RotorPlane,
-    uinf: Scalar,
+    freestream_velocity: Scalar,
     rotor_speed_i: Scalar,
     ct_i: Scalar,
     a_i: Scalar,
@@ -106,14 +106,16 @@ def wake_added_yaw(
     """Secondary-steering effective yaw (deg) that reproduces the induced spanwise velocity."""
     D = turbine.rotor_diameter
     HUB_HEIGHT = turbine.hub_height
-    TSR = turbine.tsr
+    tip_speed_ratio = turbine.tsr
     eps = EPS_GAIN * D
 
     vel_top = ((HUB_HEIGHT + D / 2) / HUB_HEIGHT) ** SHEAR
     vel_bottom = ((HUB_HEIGHT - D / 2) / HUB_HEIGHT) ** SHEAR
-    gamma_top = (math.pi / 8) * D * vel_top * uinf * ct_i
-    gamma_bottom = -1.0 * (math.pi / 8) * D * vel_bottom * uinf * ct_i
-    gamma_wake_rotation = 0.25 * 2 * math.pi * D * (a_i - a_i**2) * rotor_speed_i / TSR
+    gamma_top = (math.pi / 8) * D * vel_top * freestream_velocity * ct_i
+    gamma_bottom = -1.0 * (math.pi / 8) * D * vel_bottom * freestream_velocity * ct_i
+    gamma_wake_rotation = (
+        0.25 * 2 * math.pi * D * (a_i - a_i**2) * rotor_speed_i / tip_speed_ratio
+    )
 
     y_locs = delta_y_i + NUM_EPS
 

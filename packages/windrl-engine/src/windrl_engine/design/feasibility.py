@@ -38,9 +38,9 @@ def _pairwise_distance(
 def min_spacing_satisfied(
     coords: Float[Array, "turbines 2"], min_spacing: Float[Array, ""]
 ) -> Bool[Array, ""]:
-    n = coords.shape[0]
+    n_turbines = coords.shape[0]
     dist = _pairwise_distance(coords)
-    off_diagonal = jnp.where(jnp.eye(n, dtype=bool), jnp.inf, dist)
+    off_diagonal = jnp.where(jnp.eye(n_turbines, dtype=bool), jnp.inf, dist)
     return jnp.all(off_diagonal >= min_spacing)
 
 
@@ -65,25 +65,29 @@ def project_feasible(
     the caller's responsibility. Dense ``(N, N)`` math with no ragged ops and a
     static iteration count, so it is jit/vmap-safe.
     """
-    n = coords.shape[0]
-    not_self = ~jnp.eye(n, dtype=bool)
+    n_turbines = coords.shape[0]
+    not_self = ~jnp.eye(n_turbines, dtype=bool)
     # Target min_spacing * (1 + tol), not min_spacing exactly: a bare target
     # settles pairs on the constraint boundary where floating-point rounding
     # lands them a few ULPs *below* it, failing the strict `>=` feasibility
     # check, so the small overshoot is what makes convergence robust.
     target = site.min_spacing * (1.0 + tol)
 
-    def step(_: Array, c: Float[Array, "turbines 2"]) -> Float[Array, "turbines 2"]:
-        diff = c[:, None, :] - c[None, :, :]  # (N, N, 2), pos_i - pos_j
+    def relax_step(
+        _: Array, coords: Float[Array, "turbines 2"]
+    ) -> Float[Array, "turbines 2"]:
+        diff = coords[:, None, :] - coords[None, :, :]  # (N, N, 2), pos_i - pos_j
         dist = jnp.sqrt(jnp.sum(diff * diff, axis=-1))  # (N, N)
         safe_dist = jnp.where(dist > 0.0, dist, 1.0)
         unit = diff / safe_dist[..., None]  # separating direction, j -> i
         overlap = jnp.where(not_self & (dist < target), target - dist, 0.0)
         displacement = jnp.sum(unit * (0.5 * overlap)[..., None], axis=1)  # (N, 2)
-        moved = c + displacement
+        moved = coords + displacement
         x = jnp.clip(moved[:, 0], 0.0, site.x_extent)
         y = jnp.clip(moved[:, 1], 0.0, site.y_extent)
         return jnp.stack([x, y], axis=-1)
 
-    projected: Float[Array, "turbines 2"] = jax.lax.fori_loop(0, iters, step, coords)
+    projected: Float[Array, "turbines 2"] = jax.lax.fori_loop(
+        0, iters, relax_step, coords
+    )
     return projected

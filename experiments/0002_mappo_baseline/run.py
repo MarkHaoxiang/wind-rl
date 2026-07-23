@@ -33,7 +33,7 @@ from windrl_train.verdict import windowed_delta
 
 FRAMEWORK = "0002_mappo_baseline"
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CONF_DIR = Path(__file__).resolve().parent / "conf"
+CONFIG_DIR = Path(__file__).resolve().parent / "conf"
 
 
 class FixedWind(Config):
@@ -93,7 +93,7 @@ class SeedVerdict(NamedTuple):
     seed: int
     early: float
     trained: float
-    zero: float
+    zero_yaw_return: float
     learning_ratio: float
     power_ratio: float
 
@@ -103,7 +103,7 @@ class SeedVerdict(NamedTuple):
 
     @property
     def power_pass(self) -> bool:
-        return self.trained >= self.zero * self.power_ratio
+        return self.trained >= self.zero_yaw_return * self.power_ratio
 
     @property
     def passed(self) -> bool:
@@ -142,37 +142,37 @@ def zero_policy_return(env: EnvConf) -> float:
     return total
 
 
-def _overrides(conf: ExperimentConf, seed: int, run_dir: Path) -> list[str]:
-    e, t = conf.env, conf.train
+def _overrides(config: ExperimentConf, seed: int, run_dir: Path) -> list[str]:
+    env_conf, train_conf = config.env, config.train
     return [
         # Keep Hydra's run artifacts under WIND_RL_WDIR: runs never write into the repo.
         f"hydra.run.dir={run_dir}",
         "hydra.output_subdir=null",
-        f"env.kwargs.layout={e.layout}",
-        f"env.kwargs.horizon={e.horizon}",
-        f"env.kwargs.load_coef={e.load_coef}",
-        f"env.kwargs.yaw_step={e.yaw_step}",
-        f"+env.fixed_wind.speed={e.fixed_wind.speed}",
-        f"+env.fixed_wind.direction={e.fixed_wind.direction}",
-        f"arch.num_envs={t.num_envs}",
-        f"system.rollout_length={t.rollout_length}",
-        f"system.update_batch_size={t.update_batch_size}",
-        f"system.num_minibatches={t.num_minibatches}",
-        f"system.ppo_epochs={t.ppo_epochs}",
-        f"system.ent_coef={t.ent_coef}",
-        f"system.actor_lr={t.actor_lr}",
-        f"system.critic_lr={t.critic_lr}",
-        f"system.num_updates={t.num_updates}",
-        f"arch.num_evaluation={t.num_evaluation}",
-        f"arch.num_eval_episodes={t.num_eval_episodes}",
-        f"arch.num_absolute_metric_eval_episodes={t.num_absolute_metric_eval_episodes}",
+        f"env.kwargs.layout={env_conf.layout}",
+        f"env.kwargs.horizon={env_conf.horizon}",
+        f"env.kwargs.load_coef={env_conf.load_coef}",
+        f"env.kwargs.yaw_step={env_conf.yaw_step}",
+        f"+env.fixed_wind.speed={env_conf.fixed_wind.speed}",
+        f"+env.fixed_wind.direction={env_conf.fixed_wind.direction}",
+        f"arch.num_envs={train_conf.num_envs}",
+        f"system.rollout_length={train_conf.rollout_length}",
+        f"system.update_batch_size={train_conf.update_batch_size}",
+        f"system.num_minibatches={train_conf.num_minibatches}",
+        f"system.ppo_epochs={train_conf.ppo_epochs}",
+        f"system.ent_coef={train_conf.ent_coef}",
+        f"system.actor_lr={train_conf.actor_lr}",
+        f"system.critic_lr={train_conf.critic_lr}",
+        f"system.num_updates={train_conf.num_updates}",
+        f"arch.num_evaluation={train_conf.num_evaluation}",
+        f"arch.num_eval_episodes={train_conf.num_eval_episodes}",
+        f"arch.num_absolute_metric_eval_episodes={train_conf.num_absolute_metric_eval_episodes}",
         "arch.absolute_metric=True",
-        f"arch.evaluation_greedy={t.evaluation_greedy}",
+        f"arch.evaluation_greedy={train_conf.evaluation_greedy}",
         f"system.seed={seed}",
     ]
 
 
-def train_seed(conf: ExperimentConf, seed: int, metrics_path: Path) -> MetricsFile:
+def train_seed(config: ExperimentConf, seed: int, metrics_path: Path) -> MetricsFile:
     child_env = dict(os.environ)
     child_env["WINDRL_TRAIN_METRICS_PATH"] = str(metrics_path)
     child_env.setdefault("JAX_PLATFORMS", "cpu")
@@ -184,7 +184,7 @@ def train_seed(conf: ExperimentConf, seed: int, metrics_path: Path) -> MetricsFi
             sys.executable,
             "-m",
             "windrl_train.train",
-            *_overrides(conf, seed, run_dir),
+            *_overrides(config, seed, run_dir),
         ],
         check=True,
         cwd=REPO_ROOT,
@@ -194,7 +194,7 @@ def train_seed(conf: ExperimentConf, seed: int, metrics_path: Path) -> MetricsFi
 
 
 def evaluate_seed(
-    conf: ExperimentConf, metrics: MetricsFile, seed: int, zero: float
+    config: ExperimentConf, metrics: MetricsFile, seed: int, zero_yaw_return: float
 ) -> SeedVerdict:
     series = [p.episode_return for p in metrics.eval_series]
     if metrics.absolute_return is None:
@@ -205,14 +205,14 @@ def evaluate_seed(
         seed=seed,
         early=windowed_delta(series).first,
         trained=metrics.absolute_return,
-        zero=zero,
-        learning_ratio=conf.verdict.learning_ratio,
-        power_ratio=conf.verdict.power_gain_ratio,
+        zero_yaw_return=zero_yaw_return,
+        learning_ratio=config.verdict.learning_ratio,
+        power_ratio=config.verdict.power_gain_ratio,
     )
 
 
 def _log_wandb(
-    conf: ExperimentConf,
+    config: ExperimentConf,
     settings: WindRlSettings,
     seed: int,
     metrics: MetricsFile,
@@ -225,34 +225,35 @@ def _log_wandb(
     # renders a seed distribution rather than one line per seed (repo convention).
     run = wandb.init(
         project="wind-rl",
-        name=conf.variant,
+        name=config.variant,
         group=FRAMEWORK,
-        job_type=conf.variant,
-        tags=[FRAMEWORK, conf.variant, f"seed{seed}"],
-        config={"seed": seed, **conf.model_dump()},
+        job_type=config.variant,
+        tags=[FRAMEWORK, config.variant, f"seed{seed}"],
+        config={"seed": seed, **config.model_dump()},
         reinit=True,
     )
     for point in metrics.eval_series:
         run.log({"eval/episode_return": point.episode_return}, step=int(point.timestep))
     run.summary["eval/trained_return"] = verdict.trained
-    run.summary["eval/zero_policy_return"] = verdict.zero
-    run.summary["eval/power_gain"] = verdict.trained / verdict.zero - 1.0
+    run.summary["eval/zero_policy_return"] = verdict.zero_yaw_return
+    run.summary["eval/power_gain"] = verdict.trained / verdict.zero_yaw_return - 1.0
     run.summary["verdict/learning_pass"] = verdict.learning_pass
     run.summary["verdict/power_pass"] = verdict.power_pass
     run.summary["verdict/passed"] = verdict.passed
     run.finish()
 
 
-def _print_table(zero: float, verdicts: list[SeedVerdict]) -> None:
-    print(f"\n{FRAMEWORK}: zero-yaw baseline return = {zero:.2f}\n")
+def _print_table(zero_yaw_return: float, verdicts: list[SeedVerdict]) -> None:
+    print(f"\n{FRAMEWORK}: zero-yaw baseline return = {zero_yaw_return:.2f}\n")
     header = f"{'seed':>4} {'early':>8} {'trained':>8} {'learn x':>8} {'power x':>8} {'verdict':>8}"
     print(header)
     print("-" * len(header))
-    for v in verdicts:
-        status = "PASS" if v.passed else "FAIL"
+    for verdict in verdicts:
+        status = "PASS" if verdict.passed else "FAIL"
         print(
-            f"{v.seed:>4} {v.early:>8.2f} {v.trained:>8.2f} "
-            f"{v.trained / v.early:>8.3f} {v.trained / v.zero:>8.3f} {status:>8}"
+            f"{verdict.seed:>4} {verdict.early:>8.2f} {verdict.trained:>8.2f} "
+            f"{verdict.trained / verdict.early:>8.3f} "
+            f"{verdict.trained / verdict.zero_yaw_return:>8.3f} {status:>8}"
         )
     print()
 
@@ -270,26 +271,26 @@ def _parse_args(argv: list[str]) -> tuple[str, list[str]]:
 
 def main(argv: list[str]) -> int:
     variant, overrides = _parse_args(argv)
-    conf = ExperimentConf.from_file(CONF_DIR / f"{variant}.yaml", overrides)
+    config = ExperimentConf.from_file(CONFIG_DIR / f"{variant}.yaml", overrides)
 
     settings = WindRlSettings()
     workdir = settings.resolved_wdir / FRAMEWORK
     workdir.mkdir(parents=True, exist_ok=True)
 
-    zero = zero_policy_return(conf.env)
+    zero_yaw_return = zero_policy_return(config.env)
 
     verdicts: list[SeedVerdict] = []
-    for seed in conf.seeds:
-        metrics_path = workdir / f"{conf.variant}_seed{seed}_metrics.json"
-        metrics = train_seed(conf, seed, metrics_path)
-        verdict = evaluate_seed(conf, metrics, seed, zero)
+    for seed in config.seeds:
+        metrics_path = workdir / f"{config.variant}_seed{seed}_metrics.json"
+        metrics = train_seed(config, seed, metrics_path)
+        verdict = evaluate_seed(config, metrics, seed, zero_yaw_return)
         verdicts.append(verdict)
         if settings.wandb_mode != "disabled":
-            _log_wandb(conf, settings, seed, metrics, verdict)
+            _log_wandb(config, settings, seed, metrics, verdict)
 
-    _print_table(zero, verdicts)
+    _print_table(zero_yaw_return, verdicts)
 
-    failed = [v.seed for v in verdicts if not v.passed]
+    failed = [verdict.seed for verdict in verdicts if not verdict.passed]
     if failed:
         print(f"VERDICT: FAIL -- seeds {failed} did not clear both gates.")
         return 1

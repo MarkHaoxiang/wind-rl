@@ -40,35 +40,41 @@ def _u_on_plane(
     x_rot, y_rot = rotate_to_wind_frame(layout.x, layout.y, wind.direction)
     x_grid, y_grid, z_grid = rotor_grid(x_rot, y_rot)
     sorted_idx, _ = upstream_order(x_rot)
-    xs = x_grid[sorted_idx]
-    ys = y_grid[sorted_idx]
-    zs = z_grid[sorted_idx]
+    x_sorted = x_grid[sorted_idx]
+    y_sorted = y_grid[sorted_idx]
+    z_sorted = z_grid[sorted_idx]
 
-    yaw_s = yaw[sorted_idx]
+    yaw_sorted = yaw[sorted_idx]
     u_turbine = solution.u[sorted_idx]
     v_turbine = solution.v[sorted_idx]
-    ti_s = solution.turbulence_intensity[sorted_idx]
+    ti_sorted = solution.turbulence_intensity[sorted_idx]
 
-    u_initial_turbine, _ = initial_flow(zs, wind.speed)
-    uinf_turbine = jnp.mean(u_initial_turbine)
-    x_i_all = rotor_plane_x(xs[:, 0, 0])
-    y_i_all = jnp.mean(ys, axis=(1, 2))
+    u_initial_turbine, _ = initial_flow(z_sorted, wind.speed)
+    u_inf_mean = jnp.mean(u_initial_turbine)
+    x_i_all = rotor_plane_x(x_sorted[:, 0, 0])
+    y_i_all = jnp.mean(y_sorted, axis=(1, 2))
 
     u_initial_query, _ = initial_flow(z_query, wind.speed)
-    n = xs.shape[0]
+    n_turbines = x_sorted.shape[0]
 
     def body(i: Array, wake_field: QueryPlane) -> QueryPlane:
         x_i = x_i_all[i]
         y_i = y_i_all[i]
-        yaw_i = yaw_s[i]
-        ti_i = ti_s[i]
+        yaw_i = yaw_sorted[i]
+        ti_i = ti_sorted[i]
 
         rotor_speed = cubic_mean(u_turbine[i])
         ct_i = effective_ct(rotor_speed, yaw_i)
         a_i = axial_induction(ct_i, yaw_i)
 
         added = wake_added_yaw(
-            v_turbine[i], ys[i] - y_i, zs[i], uinf_turbine, rotor_speed, ct_i, a_i
+            v_turbine[i],
+            y_sorted[i] - y_i,
+            z_sorted[i],
+            u_inf_mean,
+            rotor_speed,
+            ct_i,
+            a_i,
         )
         effective_yaw = yaw_i + added
 
@@ -89,14 +95,16 @@ def _u_on_plane(
         )
         return jnp.hypot(wake_field, deficit * u_initial_query)
 
-    wake_field: QueryPlane = jax.lax.fori_loop(0, n, body, jnp.zeros_like(x_query))
+    wake_field: QueryPlane = jax.lax.fori_loop(
+        0, n_turbines, body, jnp.zeros_like(x_query)
+    )
     u: QueryPlane = u_initial_query - wake_field
     return u
 
 
-def _padded_bounds(lo: Array, hi: Array) -> tuple[float, float]:
+def _padded_bounds(low: Array, high: Array) -> tuple[float, float]:
     pad = PAD_DIAMETERS * D
-    return float(lo) - pad, float(hi) + pad
+    return float(low) - pad, float(high) + pad
 
 
 def horizontal_slice(
@@ -120,9 +128,9 @@ def horizontal_slice(
     ys = jnp.linspace(ymin, ymax, ny)
     x_world, y_world = jnp.meshgrid(xs, ys)  # (ny, nx)
 
-    xc, yc = layout_center(layout.x, layout.y)
+    x_center, y_center = layout_center(layout.x, layout.y)
     x_query, y_query = rotate_about(
-        x_world, y_world, wind_deviation(wind.direction), xc, yc
+        x_world, y_world, wind_deviation(wind.direction), x_center, y_center
     )
     z_query = jnp.full_like(x_query, height)
 
@@ -141,7 +149,7 @@ def vertical_slice(
 ) -> tuple[QueryPlane, Extent]:
     """u-velocity (m/s) on a streamwise x'-z plane in the WIND-ALIGNED frame at lateral y_offset."""
     x_rot, _ = rotate_to_wind_frame(layout.x, layout.y, wind.direction)
-    _, yc = layout_center(layout.x, layout.y)
+    _, y_center = layout_center(layout.x, layout.y)
     if bounds is None:
         xmin, xmax = _padded_bounds(jnp.min(x_rot), jnp.max(x_rot))
         zmin, zmax = 1.0, 3.0 * 90.0
@@ -152,7 +160,7 @@ def vertical_slice(
     xs = jnp.linspace(xmin, xmax, nx)
     zs = jnp.linspace(zmin, zmax, nz)
     x_query, z_query = jnp.meshgrid(xs, zs)  # (nz, nx)
-    y_query = jnp.full_like(x_query, float(yc) + y_offset)
+    y_query = jnp.full_like(x_query, float(y_center) + y_offset)
 
     field = _u_on_plane(layout, wind, yaw, x_query, y_query, z_query)
     return field, (xmin, xmax, zmin, zmax)

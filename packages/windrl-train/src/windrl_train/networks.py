@@ -53,13 +53,15 @@ class GCNTorso(nn.Module):
         adjacency = _row_normalized_gaussian_adjacency(
             agents_view[..., -self.pos_dim :], self.sigma
         )
-        x = nn.Dense(self.embed_dim, kernel_init=orthogonal(np.sqrt(2)))(agents_view)
+        node_embed = nn.Dense(self.embed_dim, kernel_init=orthogonal(np.sqrt(2)))(
+            agents_view
+        )
         for _ in range(self.num_rounds):
             message = nn.Dense(self.embed_dim, kernel_init=orthogonal(np.sqrt(2)))(
-                adjacency @ x
+                adjacency @ node_embed
             )
-            x = activation_fn(x + message)
-        return x
+            node_embed = activation_fn(node_embed + message)
+        return node_embed
 
 
 class GCNGlobalCritic(nn.Module):
@@ -89,13 +91,13 @@ class GCNGlobalCritic(nn.Module):
         adjacency = _row_normalized_gaussian_adjacency(
             nodes[..., -self.pos_dim :], self.sigma
         )
-        x = nn.Dense(self.embed_dim, kernel_init=orthogonal(np.sqrt(2)))(nodes)
+        node_embed = nn.Dense(self.embed_dim, kernel_init=orthogonal(np.sqrt(2)))(nodes)
         for _ in range(self.num_rounds):
             message = nn.Dense(self.embed_dim, kernel_init=orthogonal(np.sqrt(2)))(
-                adjacency @ x
+                adjacency @ node_embed
             )
-            x = activation_fn(x + message)
-        pooled = jnp.mean(x, axis=-2, keepdims=True)
+            node_embed = activation_fn(node_embed + message)
+        pooled = jnp.mean(node_embed, axis=-2, keepdims=True)
         return jnp.broadcast_to(
             pooled, (*pooled.shape[:-2], num_agents, self.embed_dim)
         )

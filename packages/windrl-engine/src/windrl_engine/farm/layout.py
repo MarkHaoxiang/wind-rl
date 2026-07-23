@@ -13,9 +13,9 @@ class FarmLayout(NamedTuple):
     y: Float[Array, "turbines"]
 
 
-def row_layout(n: int, spacing: float = 4 * D) -> FarmLayout:
-    """Single downstream row of `n` turbines along +x, uniform `spacing` (m)."""
-    x = jnp.arange(n) * spacing
+def row_layout(num_turbines: int, spacing: float = 4 * D) -> FarmLayout:
+    """Single downstream row of `num_turbines` turbines along +x, uniform `spacing` (m)."""
+    x = jnp.arange(num_turbines) * spacing
     return FarmLayout(x=x, y=jnp.zeros_like(x))
 
 

@@ -18,8 +18,8 @@ from windrl_engine.farm.layout import FarmLayout
 def _min_off_diagonal_distance(coords: jax.Array) -> jax.Array:
     diff = coords[:, None, :] - coords[None, :, :]
     dist = jnp.sqrt(jnp.sum(diff * diff, axis=-1))
-    n = coords.shape[0]
-    return jnp.min(jnp.where(jnp.eye(n, dtype=bool), jnp.inf, dist))
+    n_turbines = coords.shape[0]
+    return jnp.min(jnp.where(jnp.eye(n_turbines, dtype=bool), jnp.inf, dist))
 
 
 @pytest.mark.parametrize("n_turbines", [7, 32])

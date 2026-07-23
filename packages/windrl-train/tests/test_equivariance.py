@@ -23,21 +23,27 @@ _ATOL = 1e-6
 
 
 def _observation(agents_view: jax.Array) -> ObservationGlobalState:
-    n = agents_view.shape[0]
+    num_agents = agents_view.shape[0]
     return ObservationGlobalState(
         agents_view=agents_view[None],
-        action_mask=jnp.ones((1, n, 1), dtype=bool),
-        global_state=jnp.tile(agents_view.reshape(-1), (n, 1))[None],
-        step_count=jnp.zeros((1, n), dtype=jnp.int32),
+        action_mask=jnp.ones((1, num_agents, 1), dtype=bool),
+        global_state=jnp.tile(agents_view.reshape(-1), (num_agents, 1))[None],
+        step_count=jnp.zeros((1, num_agents), dtype=jnp.int32),
     )
 
 
-def _permute(obs: ObservationGlobalState, perm: jax.Array) -> ObservationGlobalState:
-    return _observation(obs.agents_view[0][perm])
+def _permute(
+    observation: ObservationGlobalState, permutation: jax.Array
+) -> ObservationGlobalState:
+    return _observation(observation.agents_view[0][permutation])
 
 
 def _build() -> tuple[
-    FeedForwardActor, FeedForwardValueNet, dict, dict, ObservationGlobalState
+    FeedForwardActor,
+    FeedForwardValueNet,
+    dict[str, object],
+    dict[str, object],
+    ObservationGlobalState,
 ]:
     actor = FeedForwardActor(
         torso=GCNTorso(embed_dim=32),
@@ -49,25 +55,25 @@ def _build() -> tuple[
     )
     key = jax.random.PRNGKey(0)
     agents_view = jax.random.normal(key, (_NUM_AGENTS, _NUM_FEATURES))
-    obs = _observation(agents_view)
-    actor_params = actor.init(jax.random.PRNGKey(1), obs)
-    critic_params = critic.init(jax.random.PRNGKey(2), obs)
-    return actor, critic, actor_params, critic_params, obs
+    observation = _observation(agents_view)
+    actor_params = actor.init(jax.random.PRNGKey(1), observation)
+    critic_params = critic.init(jax.random.PRNGKey(2), observation)
+    return actor, critic, actor_params, critic_params, observation
 
 
 def test_actor_equivariance_and_critic_invariance() -> None:
-    actor, critic, actor_params, critic_params, obs = _build()
-    perm = jax.random.permutation(jax.random.PRNGKey(3), _NUM_AGENTS)
-    obs_perm = _permute(obs, perm)
+    actor, critic, actor_params, critic_params, observation = _build()
+    permutation = jax.random.permutation(jax.random.PRNGKey(3), _NUM_AGENTS)
+    observation_perm = _permute(observation, permutation)
 
-    mode = actor.apply(actor_params, obs).mode()[0]
-    mode_perm = actor.apply(actor_params, obs_perm).mode()[0]
-    actor_err = float(jnp.max(jnp.abs(mode[perm] - mode_perm)))
+    mode = actor.apply(actor_params, observation).mode()[0]
+    mode_perm = actor.apply(actor_params, observation_perm).mode()[0]
+    actor_err = float(jnp.max(jnp.abs(mode[permutation] - mode_perm)))
     assert actor_err < _ATOL, f"actor not equivariant: {actor_err}"
 
-    value = critic.apply(critic_params, obs)[0]
-    value_perm = critic.apply(critic_params, obs_perm)[0]
-    critic_err = float(jnp.max(jnp.abs(value[perm] - value_perm)))
+    value = critic.apply(critic_params, observation)[0]
+    value_perm = critic.apply(critic_params, observation_perm)[0]
+    critic_err = float(jnp.max(jnp.abs(value[permutation] - value_perm)))
     assert critic_err < _ATOL, f"critic not invariant: {critic_err}"
 
     print(f"actor equivariance max abs err: {actor_err:.2e}")

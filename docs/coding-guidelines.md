@@ -33,6 +33,14 @@ Binding for all code in `src/`, `tests/`, and `experiments/`.
   subtleties) belong as inline comments next to the code they explain — and
   only where that code is surprising — never in the docstring.
 
+## Naming
+
+- A name must read correctly at the call site, without the surrounding
+  context that named it (`step_one_farm`, not `one`).
+- Spell out domain words (`layout`, `state`, `action` — not `lay`, `st`,
+  `act`). Single letters only for tight math indices that mirror a formula.
+- If an internal needs a comment to explain its role, rename it instead.
+
 ## Abstractions
 
 - Clear, small, single-purpose modules; one concept per file.

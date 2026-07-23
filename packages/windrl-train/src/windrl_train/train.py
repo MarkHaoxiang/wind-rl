@@ -77,9 +77,9 @@ warnings.filterwarnings("ignore", message=r"provider=hydra\.searchpath.*mava\.co
 
 
 @hydra.main(config_path="configs", config_name="ff_mappo", version_base="1.2")
-def main(cfg: DictConfig) -> float:
-    OmegaConf.set_struct(cfg, False)
-    eval_performance = run_experiment(cfg)
+def main(config: DictConfig) -> float:
+    OmegaConf.set_struct(config, False)
+    eval_performance = run_experiment(config)
     metrics_path = os.environ.get(_METRICS_PATH_ENV)
     if metrics_path is not None and _last_logger is not None:
         Path(metrics_path).write_text(

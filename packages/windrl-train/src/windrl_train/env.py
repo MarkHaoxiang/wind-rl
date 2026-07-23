@@ -82,13 +82,13 @@ class WindFarm(Environment):
         # Optional constant free-stream wind (wrapper-level, not a WindFarmEnvConfig
         # field): fixes the Scenario-I aligned-wind regime so wake-steering headroom
         # is deterministic. Absent -> the engine samples wind per reset (Scenario II).
-        fixed = OmegaConf.select(env_config, "fixed_wind")
+        fixed_wind_raw = OmegaConf.select(env_config, "fixed_wind")
         self._fixed_wind = (
             WindCondition(
-                speed=jnp.asarray(float(fixed.speed)),
-                direction=jnp.asarray(float(fixed.direction)),
+                speed=jnp.asarray(float(fixed_wind_raw.speed)),
+                direction=jnp.asarray(float(fixed_wind_raw.direction)),
             )
-            if fixed is not None
+            if fixed_wind_raw is not None
             else None
         )
         self.layout = self._core_config.build_layout()
@@ -103,12 +103,14 @@ class WindFarm(Environment):
         return self._core_config.horizon
 
     def _observation(
-        self, obs: Any, state: FarmState
+        self, raw_obs: Any, state: FarmState
     ) -> Observation | ObservationGlobalState:
-        per_agent = jnp.stack([obs.yaw, obs.wind_speed, obs.wind_direction], axis=-1)
-        globals_ = jnp.broadcast_to(obs.freewind, (self.num_agents, 2))
+        per_agent = jnp.stack(
+            [raw_obs.yaw, raw_obs.wind_speed, raw_obs.wind_direction], axis=-1
+        )
+        global_features = jnp.broadcast_to(raw_obs.freewind, (self.num_agents, 2))
         agents_view = jnp.concatenate(
-            [per_agent, globals_, self._norm_positions], axis=-1
+            [per_agent, global_features, self._norm_positions], axis=-1
         )
         action_mask = jnp.ones((self.num_agents, self.action_dim), dtype=bool)
         step_count = jnp.repeat(state.step_count, self.num_agents)
@@ -125,9 +127,9 @@ class WindFarm(Environment):
         )
 
     def reset(self, key: chex.PRNGKey) -> tuple[FarmState, TimeStep]:
-        state, obs = core_reset(self.layout, key, wind=self._fixed_wind)
+        state, raw_obs = core_reset(self.layout, key, wind=self._fixed_wind)
         timestep = restart(
-            self._observation(obs, state),
+            self._observation(raw_obs, state),
             shape=(self.num_agents,),
             extras={"env_metrics": {}},
         )
@@ -136,7 +138,7 @@ class WindFarm(Environment):
     def step(self, state: FarmState, action: chex.Array) -> tuple[FarmState, TimeStep]:
         yaw_step = self._core_config.yaw_step
         delta_yaw = cast(jax.Array, action.reshape(self.num_agents) * yaw_step)
-        new_state, obs, reward, truncated = core_step(
+        new_state, raw_obs, reward, truncated = core_step(
             self.layout,
             state,
             delta_yaw,
@@ -155,7 +157,7 @@ class WindFarm(Environment):
             step_type=step_type,
             reward=jnp.repeat(reward, self.num_agents),
             discount=jnp.ones(self.num_agents),
-            observation=self._observation(obs, new_state),
+            observation=self._observation(raw_obs, new_state),
             extras={"env_metrics": {}},
         )
         return new_state, timestep

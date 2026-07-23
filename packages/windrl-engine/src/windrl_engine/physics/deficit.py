@@ -5,7 +5,7 @@ from windrl_engine.physics.deflection import ALPHA, BETA, KA, KB
 from windrl_engine.physics.frame import QueryField, Scalar, TurbineTI, cosd
 
 
-def _rc(
+def _gaussian_deficit_terms(
     sigma_y: QueryField,
     sigma_z: QueryField,
     y: QueryField,
@@ -70,7 +70,7 @@ def deficit_field(
     near_base = ramp_down * 0.501 * D * jnp.sqrt(ct_i / 2.0)
     sigma_y_near = (near_base + ramp_up * sigma_y0) * (x >= xR) + (x < xR) * 0.5 * D
     sigma_z_near = (near_base + ramp_up * sigma_z0) * (x >= xR) + (x < xR) * 0.5 * D
-    r_near, c_near = _rc(
+    r_near, c_near = _gaussian_deficit_terms(
         sigma_y_near, sigma_z_near, y, y_i, deflection, z, ct_i, yaw, turbine
     )
     near_deficit = c_near * jnp.exp(-r_near) * near_mask
@@ -79,7 +79,7 @@ def deficit_field(
     kz = KA * ti_i + KB
     sigma_y_far = (ky * (x - x0) + sigma_y0) * far_mask + sigma_y0 * (x < x0)
     sigma_z_far = (kz * (x - x0) + sigma_z0) * far_mask + sigma_z0 * (x < x0)
-    r_far, c_far = _rc(
+    r_far, c_far = _gaussian_deficit_terms(
         sigma_y_far, sigma_z_far, y, y_i, deflection, z, ct_i, yaw, turbine
     )
     far_deficit = c_far * jnp.exp(-r_far) * far_mask
