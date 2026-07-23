@@ -1,6 +1,6 @@
 # wind-rl — Architecture & Research Plan
 
-Date: 2026-07-19 · Author: planning agent · Status: DRAFT (owner review required)
+Date: 2026-07-23 · Author: planning agent · Status: DRAFT (owner review required)
 
 wind-rl is the applications-paper successor to the WFCRL section of **DiCoDe**
 (Li, Amir, Prorok, "Scaling Multi-Agent Environment Co-Design with Diffusion
@@ -59,9 +59,10 @@ most naturally means for a generative prior) and treat FastFarm transfer as a
 stretch experiment. **Owner: confirm which is the paper's C3.**
 
 ### Milestone roadmap
-- **M1 — Reproduce baseline.** MAPPO-on-WFCRL at small scale (2–3 then 8–16
-  turbines, FLORIS, yaw). Match DiCoDe's power-capture numbers. Walking
-  skeleton + infra (CI, tests, config, logging).
+- **M1 — Reproduce baseline.** MAPPO (Mava) on `windrl-engine` at small scale
+  (2–3 then 8–16 turbines, yaw). Fidelity anchored by the FLORIS golden suite;
+  match DiCoDe's power-capture numbers. Walking skeleton + infra (CI, tests,
+  config, logging).
 - **M2 — Architecture upgrades.** Permutation-invariant / E(n)-equivariant
   layout generator (real E-GNN, not DiCoDe's MLP stub) and equivariant MAPPO
   policy/critic. Demonstrate C2; drop guidance annealing.
@@ -76,149 +77,97 @@ stretch experiment. **Owner: confirm which is the paper's C3.**
 
 ## 2. Code architecture
 
-Design within the **uv workspace**. The root pyproject is a virtual workspace
-coordinator; the main package is `packages/wind-rl/` (src layout).
-`packages/wfcrl-env` is the author's fork (submodule) consumed as a library.
-`experiments/` holds numbered frameworks following the
-physics-informed-flow-map convention: `NNNN_slug/run.py` + `conf/`,
-`report.md`, append-only `JOURNAL.md`.
+The stack is JAX-native (owner decision 2026-07-22). Simulation, training, and
+the generative/design layer are separate packages in the **uv workspace**;
+`experiments/` holds numbered frameworks (`NNNN_slug/run.py` + `conf/`,
+`report.md`, owner-managed `JOURNAL.md`).
 
-### `wind_rl` package submodule tree (one-line responsibilities)
+### Packages (one-line responsibilities)
 
 ```
-packages/wind-rl/src/wind_rl/
-  config.py          # pydantic v2 Config base (extra="forbid") + OmegaConf/Hydra
-                     #   override merge — the "pydra" pattern. Discriminated-union
-                     #   configs for designer/model/scenario.
-  scenario.py        # ScenarioConfig (n_turbines, max_steps, map_x/y_length,
-                     #   min_distance) + real-farm registry mapping name->wfcrl case.
-  env/
-    windfarm.py      # DesignableWindFarmEnv(MAWindFarmEnv): adds `layout` to
-                     #   state/obs; reset(options={xcoords,ycoords}) rebuilds MDP.
-    wrapper.py       # WfcrlCoDesignWrapper(PettingZooWrapper): pulls layout from
-                     #   designer at _reset; injects state() into td.
-    factory.py       # make_env(mode, scenario, designer, simulator, device) ->
-                     #   TransformedEnv; the single env-creation pipeline.
-    transforms.py    # RewardNormalisation TorchRL Transform (fixes DiCoDe TODO:
-                     #   normalisation was a script, now an env transform), RewardSum.
-    render.py        # matplotlib rgb_array layout render for wandb video.
-  models/
-    base.py          # Policy/Critic/LayoutGenerator/EnvCritic protocols.
-    gnn.py           # Permutation-invariant GNN policy/critic (DeepSets/PNA).
-    equivariant.py   # E(n)-equivariant layout generator + policy (EGNN); the real
-                     #   architecture replacing DiCoDe's E3GNN stub.
-    mlp.py           # MLP baselines (parity with DiCoDe model_type="mlp").
-    heads.py         # MultiAgentMLP + NormalParamExtractor -> TanhNormal actor;
-                     #   mean-pooled centralized critic head.
-  generative/
-    diffusion.py     # DDIM layout generator (repro of DiCoDe designer).
-    guidance.py      # Guided sampling: PUG-style projected guidance + constraint
-                     #   projection (min-distance, boundary polygon).
-    constraints.py   # Feasibility: min-distance + site boundary; soft penalty and
-                     #   hard (SLSQP) projection.
-  design/
-    base.py          # Designer[SC] ABC: generate_layout_batch(n), update(td),
-                     #   get_state/get_logs; DesignProducer/DesignConsumer buffer.
-    buffer.py        # File-backed lock-protected layout buffer (pop at env reset).
-    value_learner.py # ValueLearner: critic distillation for env-critic training.
-    designers.py     # Random/Fixed/Manual/Sampling/Descent/Reinforce/Replay +
-                     #   DicodeDesigner; create_designer() factory
-                     #   over discriminated-union DesignerConfig.
-  rl/
-    mappo.py         # MAPPO trainer (TorchRL ClipPPOLoss/GAE/SyncDataCollector).
-    trainer.py       # Trainer class: collect->GAE->PPO epochs->designer.update->
-                     #   eval->checkpoint loop. De-generic'd from DiCoDe's ABC.
-  experiment/
-    harness.py       # Run lifecycle: start_run/log/finish (wandb), checkpointing,
-                     #   workdir resolution via pydantic-settings.
-    settings.py      # WindRlSettings(BaseSettings): WIND_RL_WDIR etc. (fixes
-                     #   DiCoDe's hardcoded ~/.diffusion_co_design + hardcoded paths).
-    normalisation.py # Compute NormalisationStatistics from random-policy rollouts.
-  utils/             # seeding, device management, logging helpers.
+packages/windrl-engine/   JAX wind-farm simulator — the environment.
+                          Layers farm → physics → env (+ analysis side-car);
+                          full GCH physics, FLORIS-faithful to machine
+                          precision via committed goldens; batched envs ×
+                          wind conditions; fidelity flag ("floris" |
+                          "corrected") and selectable turbine library
+                          (nrel5mw_v3 / v4). Source of truth:
+                          docs/plans/2026-07-22-windrl-engine-design.md and
+                          docs/plans/2026-07-22-jax-windfarm-step-spec.md.
+packages/windrl-train/    MARL training on the engine via Mava MAPPO
+                          (continuous actions, one agent per turbine).
+                          Workspace-EXCLUDED: Mava pins jax==0.5.3 and
+                          py<3.13, so this package owns a py3.12 venv and
+                          lock; the jumanji-style wrapper adapts the engine's
+                          single-farm functional core (Mava vmaps envs
+                          itself). Zero Mava source edits.
+packages/wind-rl/         Generative/co-design layer (torch, cu130 index) +
+                          experiment harness:
+  config.py               #   pydantic v2 Config base ("pydra" pattern).
+  scenario.py             #   ScenarioConfig (procedural scenarios; real
+                          #   farm layouts now live in windrl_engine.farm).
+  generative/             #   DDIM layout generator, PUG guidance,
+                          #   feasibility constraints (SLSQP projection).
+  design/geometry.py      #   layout geometry utilities.
+  experiment/             #   settings (WIND_RL_* env vars), wandb harness,
+                          #   sweep/table/verdict machinery, cli.
+packages/mfm/             Vendored flow-map core (currently orphaned —
+                          removal pending owner decision).
 ```
 
-### Key interfaces / signatures
+### Reference fidelity (replaces the wfcrl dependency)
 
-**Designer** (fix DiCoDe: no dummy ScenarioConfig, buffer stays):
-```python
-class Designer(Protocol[SC]):
-    def generate_layout_batch(self, batch_size: int) -> np.ndarray:  # (B, N, 2)
-    def update(self, sampling_td: TensorDict) -> None: ...            # no-op for static
-    def to_td_module(self) -> TensorDictModule: ...   # reset_policy for env wrapper
-    def get_logs(self) -> dict: ...
+`packages/windrl-engine/tests/goldens/` freezes the reference:
+`floris_v3.5.npz` (solver fields, verified 1e-12 against the live stack
+before wfcrl removal), `wfcrl_env_trajectories.npz` (env behavior incl.
+duty-cycle firing and the truncation boundary), `floris_v4.6.6.npz`
+(latest-FLORIS turbine library). Reference tests assert against goldens, run
+unfiltered on CI, and need no wfcrl/floris install; regeneration scripts run
+FLORIS in isolated envs (`uv run --isolated --with floris==…`).
 
-def create_designer(cfg: DesignerConfig, scenario: SC, artifact_dir: Path,
-                    device: str) -> tuple[Designer[SC], Callable[[], DesignConsumer]]:
-```
+### Key interfaces
 
-**Env pipeline** (single entry point; simulator selectable — fixes FLORIS-hardcode):
-```python
-def make_env(mode: Literal["train","eval","reference"], scenario: ScenarioConfig,
-             designer: DesignConsumer, simulator: Literal["floris","fastfarm"]="floris",
-             device: str | None = None, render: bool = False) -> TransformedEnv:
-```
-Internally: build `FlorisCase`/`FastFarmCase` from scenario coords ->
-`DesignableWindFarmEnv(interface=FlorisInterface|FastFarmInterface,
-controls=get_default_control(["yaw"]), ...)` -> `aec_to_parallel` ->
-`WfcrlCoDesignWrapper(reset_policy=designer.to_td_module())` ->
-`TransformedEnv(Compose(RewardNormalisation(...), RewardSum(...), RemoveEmptySpecs()))`.
-
-**Trainer**:
-```python
-class MappoTrainer:
-    def __init__(self, cfg: TrainingConfig, project_name: str): ...
-    def run(self) -> None: ...   # collect frames_per_batch -> minibatch GAE ->
-                                 # PPO n_epochs x n_mini_batches -> designer.update ->
-                                 # periodic eval rollout + wandb video + checkpoint
-```
+Engine: `solve_farm(layout, wind, yaw, …) -> FlowSolution`,
+`turbine_powers`, functional `reset`/`step`, `BatchedWindFarmEnv`,
+`analysis.{power_surface, aep, flow slices}` — signatures fixed in the engine
+design doc. Training: `windrl_train.env.WindFarm` (jumanji contract) +
+`windrl_train.train` (Mava ff_mappo entrypoint, hydra-composed). The
+co-design `Designer` layer was deleted with the torch stack and will be
+reintroduced JAX-side when co-design work starts (see T4).
 
 ### What to keep vs fix (from DiCoDe)
-Keep: TorchRL MAPPO loop, `Designer` abstraction, file-backed layout buffer,
-critic distillation `ValueLearner`, `create_designer`/`create_env` factories,
-two-stage config with scenario registry, wandb video/artifact logging.
-Fix (DiCoDe TODOs): (a) reward normalisation as a **TorchRL env Transform**, not
-a standalone script; (b) **no dummy `ScenarioConfig`** in generation code; (c)
-**no hardcoded paths** — workdir via `pydantic-settings` (`WIND_RL_WDIR`); (d)
-simulator is a config field (wire FastFarm); (e) real E(n)-equivariant generator
-replacing the empty `E3GNN` stub; (f) CI + typed configs + real tests.
-
-### torchrl migration risk (FLAG)
-DiCoDe pins `torchrl>0.9,<0.10`; wind-rl is `torchrl==0.11.1`. Expect breaking
-changes across two minor versions in: `PettingZooWrapper`, `ClipPPOLoss`
-(`deactivate_vmap`/`set_keys` args), `SyncDataCollector`, GAE `value_estimator`,
-`ProbabilisticActor`/`TanhNormal` key wiring, `TransformedEnv` spec transforms.
-**M1 task 2 must include a torchrl-0.11 smoke port before any algorithm work**;
-budget time for API churn. `support_vmap=False` path (PNA GAE) especially at risk.
+Kept in spirit, JAX-side: batched env evaluation, two-stage config with a
+scenario registry, wandb logging (via Mava), no hardcoded paths
+(`pydantic-settings`, `WIND_RL_WDIR`), CI + typed configs + real tests.
+Superseded rather than ported: TorchRL loop → Mava; wfcrl env wrappers → the
+engine itself; reward normalisation transform → engine-side reward, revisit
+at M1 if training needs it. Still open from DiCoDe: real E(n)-equivariant
+generator (T7), designer abstraction rebuilt JAX-side (T4).
 
 ---
 
 ## 3. Dependency plan
 
-Add to root `pyproject` `[project.dependencies]` (another agent edits — this plan
-only specifies): `hydra-core`, `omegaconf`, `pydantic>=2`, `pydantic-settings`,
-`tensordict` (matched to torchrl 0.11.1), `wandb[media]`, `matplotlib`, `numpy`,
-`scipy` (SLSQP projection), `tqdm`. `floris` and `fastfarm`/MPI deps come via
-`wfcrl-env`'s own extras — do not duplicate.
+**Workspace (py3.13, jax 0.11 locked):** `windrl-engine` depends on
+`jax>=0.5.3` (floor kept low for windrl-train interop), `jaxtyping`,
+`pydantic>=2`; `matplotlib` behind its `viz` extra. `wind-rl` keeps `torch`
+(cu130 index) for the generative stack only, plus `hydra-core`, `omegaconf`,
+`pydantic-settings`, `wandb[media]`, `scipy` (SLSQP), `numpy`, `tqdm`.
+`torchrl`/`tensordict`/`pettingzoo`/`wfcrl` are gone.
 
-Dev `[dependency-groups]` (match author convention): `ruff>=0.15`, `mypy>=1.11`,
-`pytest>=8`, `pytest-xdist`, `pre-commit>=4`, `ipykernel`. Local pre-commit hooks
-(ruff-check --fix, ruff-format, mypy on `src`+`tests`+`experiments`, fast pytest)
-and a `.github/workflows/ci.yml` mirroring catan-engine (`uv sync --locked`, ruff
-check/format --check, mypy, pytest, experiments smoke with `WANDB_MODE=disabled`).
+**windrl-train (workspace-excluded):** own py3.12 venv + lock; Mava pinned to
+a git sha (jax==0.5.3 transitively). Revisit whenever Mava relaxes its pins —
+the goal is to rejoin the workspace when jax constraints allow.
 
-**Avoid DiCoDe's torch_scatter/torch_cluster manual `--no-build-isolation` pain.**
-Two options, prefer (A):
-- **(A) Architectures that need neither.** Implement DeepSets/attention-based
-  permutation-invariant layers and a hand-rolled EGNN using dense/`torch`-native
-  `scatter_add`/`index_add_` and full or KNN graphs via `torch.cdist` +
-  `topk`. At N<=92 dense O(N^2) message passing is cheap; no compiled geometric
-  extensions required. **This is the recommended default.**
-- **(B) If PyG is desired**, add `torch-geometric` **only** (pure-Python core;
-  needs no scatter/cluster wheels for the layers we use) and forbid any op
-  requiring `torch-scatter`/`torch-cluster`. Document the constraint in the
-  package README so nobody reintroduces the wheel-build pain.
+**CI** installs sequentially (CPU torch for wind-rl's generative closure, CPU
+jax for windrl-engine) to avoid multi-GB CUDA wheels; the whole test suite
+runs unfiltered (reference tests are golden-based, no wfcrl/MPI needed).
+windrl-train is not exercised on CI yet (needs its own py3.12 job — open).
 
-torch/torchvision already routed to the cu130 index in `pyproject`; keep that.
+**Geometric-dependency rule (unchanged in spirit):** no `torch_scatter` /
+`torch_cluster` ever; JAX-side the engine already uses dense `(N,N)`
+interactions and `.at[].add()` scatters. Any future JAX GNN layers for
+policies follow the same dense/topk pattern inside Mava network torsos.
 
 ---
 
@@ -226,7 +175,7 @@ torch/torchvision already routed to the cu130 index in `pyproject`; keep that.
 
 Each task: goal / files / interfaces / acceptance. Tasks 1–4 = walking skeleton.
 
-**T1 — Package skeleton, config, settings, CI.**
+**T1 — Package skeleton, config, settings, CI.** *(done)*
 Goal: buildable package + tooling parity with author repos.
 Files: `src/wind_rl/{config.py,scenario.py,experiment/settings.py,utils/*}`,
 `docs/`, `.pre-commit-config.yaml`, `.github/workflows/ci.yml`, `tests/`.
@@ -235,41 +184,32 @@ Interfaces: `Config` base (pydantic, `extra="forbid"`, OmegaConf merge);
 Accept: `uv run mypy src` clean; `uv run pytest -q` green; CI job passes;
 `Config.from_raw(OmegaConf.create({...}))` round-trips a scenario.
 
-**T2 — Env wrapper + torchrl-0.11 port.**
-Goal: `DesignableWindFarmEnv` + `WfcrlCoDesignWrapper` + `make_env` on FLORIS,
-ported to torchrl 0.11.1.
-Files: `env/{windfarm.py,wrapper.py,factory.py,transforms.py,render.py}`.
-Interfaces: `make_env(...)` (§2); `RewardNormalisation` Transform.
-Accept: test builds a 3-turbine FLORIS env, `reset(options={xcoords,ycoords})`
-rebuilds the MDP and `state()["layout"]` reflects new coords; a random rollout of
-`scenario.max_steps` runs without spec/vmap errors; obs/action specs match
-`num_turbines`.
+**T2 — Environment.** *(superseded — done differently)* Replaced by
+`packages/windrl-engine`: JAX rewrite with golden-anchored FLORIS fidelity,
+batched envs, layout as first-class input. Layout injection at reset (the
+co-design seam) exists via `FarmLayout` but a designer-driven reset feed is
+T4 work.
 
-**T3 — MLP MAPPO trainer smoke (walking skeleton).**
-Goal: end-to-end MAPPO training on 2–3 turbine FLORIS with `FixedDesigner`.
-Files: `models/{mlp.py,heads.py}`, `rl/{mappo.py,trainer.py}`,
-`experiments/0001_mappo_smoke/{run.py,conf/}`, `report.md`, `JOURNAL.md`.
-Interfaces: `MappoTrainer.run()`; TorchRL `ClipPPOLoss`+GAE+`SyncDataCollector`.
-Accept: `WANDB_MODE=disabled` 5-iter run completes; asserted mean episode power
-strictly increases over a short run (thresholded, in code); checkpoint written +
-reloadable.
+**T3 — MAPPO trainer smoke (walking skeleton).** *(superseded — done
+differently)* Replaced by `packages/windrl-train` (Mava ff_mappo, continuous
+actions). Smoke runs complete on turb3 and horns_rev2. Still open from the
+original acceptance: an experiments-framework run with an asserted
+power-increase threshold (M1 exit criterion).
 
-**T4 — Designer abstraction + buffer + baseline designers.**
-Goal: `Designer` interface, layout buffer, and the static/search baselines.
-Files: `design/{base.py,buffer.py,designers.py}`; `scenario.py` real-farm registry.
-Interfaces: `Designer` protocol (§2); `create_designer(cfg, ...)`.
-Accept: Random/Fixed/Manual/Sampling/Descent/Reinforce/Replay each produce a
-feasible `(B,N,2)` batch (min-distance + boundary satisfied); env pops layouts at
-reset; `create_designer` dispatches over the discriminated union; Manual matches a
-published HornsRev1 layout.
+**T4 — Designer abstraction + baseline designers (JAX-side rebuild).**
+Goal: reintroduce the `Designer` interface over `windrl_engine`'s
+`FarmLayout` (the torch implementation was deleted with the RL stack):
+layout generation/update API, env reset feed, and the static/search
+baselines (Random/Fixed/Manual/Sampling/Descent/Reinforce/Replay).
+Accept: feasible `(B,N,2)` batches (min-distance + boundary); batched envs
+consume designer layouts at reset; Manual matches a published HornsRev1
+layout.
 
-**T5 — Permutation-invariant GNN policy/critic.**
-Goal: DeepSets/PNA policy+critic (no torch-scatter), parity with DiCoDe GNN.
-Files: `models/{gnn.py,base.py}`.
-Interfaces: `Policy`/`Critic` protocols; KNN/full graph via `torch.cdist`.
-Accept: permutation-equivariance unit test (permuting turbines permutes actions
-identically); MAPPO run on 8-turbine FLORIS beats MLP at matched frames
-(thresholded); no compiled geometric extension imported.
+**T5 — Permutation-invariant policy/critic (Mava network torsos).**
+Goal: DeepSets/attention torsos plugged into Mava's actor/critic network
+config (JAX, dense/topk graphs — no compiled geometric extensions).
+Accept: permutation-equivariance unit test; MAPPO on 8 turbines beats the
+MLP torso at matched frames (thresholded).
 
 **T6 — Diffusion reference designer + env critic + distillation.**
 Goal: reproduce DiCoDe's guided-DDIM `DicodeDesigner` for comparison under our infra.
@@ -280,9 +220,9 @@ Accept: on 8-turbine FLORIS, DicodeDesigner co-design matches published DiCoDe
 power within tolerance; feasibility maintained; NFE/iteration logged.
 
 **T7 — E(n)-equivariant generator + policy (C2).**
-Goal: real EGNN replacing the DiCoDe stub; equivariant layout prior + policy.
-Files: `models/equivariant.py`.
-Interfaces: E(n)-equivariant layers (torch-native scatter).
+Goal: real EGNN replacing the DiCoDe stub; equivariant layout prior (torch,
+generative stack) + equivariant policy torso (JAX, Mava).
+Interfaces: E(n)-equivariant layers (dense scatters, both frameworks).
 Accept: rotation/translation-equivariance unit tests pass; equivariant layout
 prior + equivariant policy meets/beats T5 at matched compute; run is stable
 **without guidance-weight annealing** (ablate annealing on/off).
@@ -291,15 +231,15 @@ prior + equivariant policy meets/beats T5 at matched compute; run is stable
 Goal: co-design on large real layouts; wall-clock/NFE benchmarks.
 Files: `experiments/0002_scale/{run.py,conf/}`, report + journal.
 Interfaces: scenarios `wfcrl_{32,64,92}` + HornsRev1/2/Ormonde/WMR.
-Accept: the equivariant co-designer trains stably at 64 and 92 turbines where
-REINFORCE collapses; power > all non-generative baselines (thresholded); FLORIS
-case-file housekeeping bounded (no unbounded `__simul__` accumulation).
+Accept: the equivariant co-designer trains stably at 64 and 91 turbines where
+REINFORCE collapses; power > all non-generative baselines (thresholded).
+(windrl-engine makes this cheap: 91T is ~1.9 ms/env-step batched on CPU.)
 
 **T9 — Domain-specific fine-tuning (C3).**
 Goal: fine-tune pretrained layout prior per site (boundary + wind rose).
 Files: `experiments/0003_finetune/{run.py,conf/}`; `generative/diffusion.py` hooks.
 Interfaces: fine-tune API on a pretrained prior with site constraint/wind-rose
-conditioning; optional FastFarm policy-transfer path in `make_env(simulator=...)`.
+conditioning; (stretch) FastFarm policy transfer — see T11 caveat.
 Accept: fine-tuned prior yields higher-power feasible layouts than generic prior
 on >=2 real sites (thresholded); (stretch) FLORIS->FastFarm policy fine-tune
 beats from-scratch FastFarm at matched wall-clock.
@@ -311,9 +251,11 @@ Accept: all headline claims C1–C3 backed by asserted thresholds in code; figur
 regenerate from logged runs; `report.md` states hypothesis->setup->results->
 decision per the experiments contract.
 
-**T11 (optional) — FastFarm high-fidelity integration hardening.**
-Goal: robust MPI/FastFarm path if C3's transfer track is adopted.
-Accept: FastFarm 3-turbine env runs a short rollout in CI-skippable slow test.
+**T11 (optional) — FastFarm high-fidelity integration.**
+Goal: MPI/FastFarm path if C3's transfer track is adopted. Caveat: the wfcrl
+fork (which carried the FastFarm MPI interface) left the repo 2026-07-23; this
+task now means a fresh integration against windrl-engine's env contract.
+Accept: FastFarm 3-turbine env runs a short rollout in a CI-skippable slow test.
 
 ---
 
