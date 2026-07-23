@@ -12,19 +12,28 @@ torch = [
 torchvision = [
   { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
-wfcrl = { workspace = true }
 wind-rl = { workspace = true }
+
+# torch/torchvision are pinned to the CUDA 13.0 wheels on linux/win (see the
+# sources above); `explicit = true` keeps this index off every other package's
+# resolution. wind-rl now depends on torch directly (it left the graph with the
+# torchrl RL stack but generative/utils still import it), which is what makes
+# this index declaration load-bearing rather than latent.
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
 [dependency-groups]
 # Deliberately does *not* list "wind-rl" here (unlike catan-engine's pattern
 # of listing every workspace member in dev): a virtual workspace's plain
-# `uv sync` already installs every `[tool.uv.workspace]` member (wind-rl,
-# wfcrl) regardless of dev-group membership, so `uv run python -c "import
-# wind_rl"` works at root without it. Listing it would instead make CI's
-# `uv sync --only-dev` step (see ci.yml) pull wind-rl's full dependency
-# closure -- including cu130 torch -- defeating the staged CPU-torch install
-# CI relies on. Verified empirically: `--only-dev` with wind-rl omitted here
-# installs tooling only; with it added, torch+CUDA wheels come along.
+# `uv sync` already installs every `[tool.uv.workspace]` member regardless of
+# dev-group membership, so `uv run python -c "import wind_rl"` works at root
+# without it. Listing it would instead make CI's `uv sync --only-dev` step (see
+# ci.yml) pull wind-rl's full dependency closure -- including cu130 torch --
+# defeating the staged CPU-torch install CI relies on. Verified empirically:
+# `--only-dev` with wind-rl omitted here installs tooling only; with it added,
+# torch+CUDA wheels come along.
 dev = [
     "beartype>=0.19",
     "mypy>=1.11",
@@ -36,7 +45,6 @@ dev = [
 ]
 
 [tool.ruff]
-extend-exclude = ["packages/wfcrl-env"]
 # wind_rl now lives under packages/wind-rl/src, not the repo-root `src/` ruff
 # auto-detects by default; without this, isort no longer recognizes `wind_rl`
 # as first-party and re-groups import blocks (moved files must stay
@@ -61,7 +69,6 @@ disallow_any_explicit = true
 warn_unreachable = true
 local_partial_types = true
 explicit_package_bases = true
-exclude = ["packages/wfcrl-env"]
 enable_error_code = [
     "ignore-without-code",
     "redundant-expr",
@@ -79,13 +86,12 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["wfcrl.*", "torchrl.*", "tensordict.*", "pettingzoo.*", "wandb.*", "hydra.*", "matplotlib.*", "scipy.*", "tqdm.*", "floris.*"]
+module = ["wandb.*", "hydra.*", "matplotlib.*", "scipy.*", "tqdm.*", "floris.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["packages/wind-rl/tests", "packages/windrl-engine/tests"]
 addopts = "-q"
 markers = [
-    "sim: touches wfcrl/FLORIS (needs system MPI + FLORIS at import); run locally, excluded from CI via `-m 'not sim'`",
     "slow: long-running (large sample counts, many env steps); excluded from quick local runs on request only, not from CI by default",
 ]

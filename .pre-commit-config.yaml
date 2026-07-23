@@ -18,7 +18,7 @@ repos:
         # Experiments are standalone Hydra scripts in digit-prefixed dirs (run.py
         # collides as a duplicate module across dirs), so each dir is checked on
         # its own.
-        entry: bash -c 'shopt -s nullglob; uv run mypy packages/wind-rl/src packages/wind-rl/tests && for d in experiments/*/; do uv run mypy "$d" || exit 1; done'
+        entry: bash -c 'shopt -s nullglob; uv run mypy packages/wind-rl/src packages/wind-rl/tests && uv run mypy packages/windrl-engine/src && for d in experiments/*/; do if find "$d" -name "*.py" -print -quit | grep -q .; then uv run mypy "$d" || exit 1; fi; done'
         language: system
         types: [python]
         pass_filenames: false

@@ -37,19 +37,15 @@ jobs:
       - name: Install CPU torch + torchvision
         run: uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Install torchrl (resolves against the CPU torch above)
-        run: uv pip install "torchrl==0.11.1"
-
-      # scipy (SLSQP feasibility projection) and timm are pulled in by the
-      # non-sim generative tests: `wind_rl.generative` imports the vendored
-      # `mfm` flow-map core, whose import closure needs timm (its models/losses
-      # __init__ import the DiT, which imports timm). timm brings a CPU
-      # torchvision, resolved against the CPU torch installed above.
+      # torch stays: wind_rl.generative (SLSQP feasibility projection) and
+      # wind_rl.utils import it directly now that the torchrl RL stack is gone.
+      # timm brings a CPU torchvision (resolved against the CPU torch above) for
+      # the vendored `mfm` flow-map core imported by the generative closure.
       - name: Install pure-Python runtime deps
         run: >-
           uv pip install
           "hydra-core>=1.3.4" "matplotlib>=3.10.8" "numpy>=2.4.4"
-          "omegaconf>=2.3.1" "pettingzoo>=1.25.0" "pydantic>=2"
+          "omegaconf>=2.3.1" "pydantic>=2"
           "pydantic-settings>=2.14.2" "scipy>=1.14" "timm"
           "tqdm>=4.69.0" "wandb[media]>=0.28.1"
 
@@ -81,15 +77,20 @@ jobs:
 
       # Experiments are standalone Hydra scripts in digit-prefixed dirs (run.py
       # collides as a duplicate module across dirs), so each dir is checked on
-      # its own, mirroring the pre-commit hook.
+      # its own, mirroring the pre-commit hook. Dirs with no .py files (e.g. a
+      # retired framework kept only for its report.md) are skipped -- mypy errors
+      # on an empty target rather than passing trivially.
       - name: Mypy (experiments, per directory)
-        run: for d in experiments/*/; do uv run --no-sync mypy "$d" || exit 1; done
+        run: >-
+          for d in experiments/*/; do
+            if find "$d" -name '*.py' -print -quit | grep -q .; then
+              uv run --no-sync mypy "$d" || exit 1;
+            fi;
+          done
 
-      # `wfcrl` (the workspace member) needs system MPI + FLORIS, which the
-      # runner does not provide, so the FLORIS-touching tests are marked `sim`
-      # and excluded here. They still run locally and in the pre-commit hook,
-      # where wfcrl is installed. Excluded: the full env pipeline (tests/env),
-      # model/trainer smoke runs, the designer<->env integration test, and the
-      # real-farm layout registry tests (all import `wfcrl`).
-      - name: Pytest (non-sim)
-        run: uv run --no-sync pytest -q -m "not sim"
+      # The FLORIS reference tests (packages/windrl-engine/tests) now assert
+      # against committed goldens (goldens/floris_v3.5.npz + the frozen WFCRL
+      # env trajectories), so nothing imports wfcrl/FLORIS at test time and the
+      # whole suite runs on CI unfiltered.
+      - name: Pytest
+        run: uv run --no-sync pytest -q
