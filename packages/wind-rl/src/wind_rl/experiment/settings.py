@@ -15,7 +15,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class WindRlSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="WIND_RL_", extra="forbid")
 
-    wdir: Path = Path("~/.wind_rl")
+    # Repo-root `outputs/` is gitignored, so default runs never dirty the tree.
+    wdir: Path = Path("outputs")
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
 
     @property

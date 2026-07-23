@@ -15,6 +15,9 @@ defaults:
 # WIND_RL_WANDB_MODE / WIND_RL_WDIR inside WandbLogger. The run `name` must not
 # encode the seed (seeds share a name for group-by-name); the seed lives in tags.
 logger:
+  # Mava's json/tensorboard/checkpoint artifacts follow the WIND_RL_WDIR
+  # contract (repo-root `outputs/` by default, which is gitignored).
+  base_exp_path: ${oc.env:WIND_RL_WDIR,outputs}/mava
   loggers:
     wandb:
       _target_: windrl_train.logging.WandbLogger
@@ -36,3 +39,7 @@ logger:
 hydra:
   searchpath:
     - pkg://mava.configs
+  # Hydra's run artifacts (.hydra config snapshot, job log) land in the same
+  # gitignored output area instead of a repo-root `outputs/<date>` scatter.
+  run:
+    dir: ${oc.env:WIND_RL_WDIR,outputs}/hydra/${now:%Y-%m-%d_%H-%M-%S}

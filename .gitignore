@@ -4,7 +4,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
-runs/
+# Single output area: all run artifacts (wandb, Hydra dirs, Mava artifacts,
+# experiment results) default here via WIND_RL_WDIR.
+/outputs/
 wandb/
-__simul__/
 *.egg-info/

@@ -77,7 +77,9 @@ Mode and output directory mirror the same `WIND_RL_*` env-var contract used
 elsewhere in the repo (mirrored, **not** imported — this venv has no `wind_rl`):
 
 - `WIND_RL_WANDB_MODE` — `online` (default) | `offline` | `disabled`.
-- `WIND_RL_WDIR` — wandb run dir (default `~/.wind_rl`).
+- `WIND_RL_WDIR` — output dir for wandb runs, Hydra run artifacts, and Mava's
+  `base_exp_path` (default `outputs/` relative to the launch cwd — the
+  repo-root `outputs/` is gitignored).
 
 The run `name` (default `mappo-mlp-<layout>`) deliberately omits the seed so
 seeds share a name and wandb group-by-name shows the seed distribution; the seed

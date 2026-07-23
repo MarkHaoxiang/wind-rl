@@ -7,7 +7,7 @@ from wind_rl.experiment.settings import WindRlSettings
 
 def test_default_wdir() -> None:
     settings = WindRlSettings()
-    assert settings.wdir == Path("~/.wind_rl")
+    assert settings.wdir == Path("outputs")
     assert settings.wandb_mode == "online"
 
 

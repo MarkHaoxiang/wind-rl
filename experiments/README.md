@@ -43,10 +43,10 @@ an asserted threshold is a plot, not a finding.
 
 ## Where outputs land
 
-Runs never write into the repo. All local artifacts (checkpoints, logged
-layouts, rendered videos, config snapshots) go under `WIND_RL_WDIR`
-(`WindRlSettings`, default `~/.wind_rl`, override via the `WIND_RL_WDIR` env
-var) — set it per-machine, not hardcoded in a script.
+All local artifacts (checkpoints, logged layouts, rendered videos, config
+snapshots) go under `WIND_RL_WDIR` (`WindRlSettings`, default `outputs/` at the
+repo root — gitignored, so runs never dirty the tree; override via the
+`WIND_RL_WDIR` env var) — set it per-machine, not hardcoded in a script.
 
 Tracking (config, metrics, media, verdict) goes to **Weights & Biases**,
 controlled by `WIND_RL_WANDB_MODE` (plain `WANDB_MODE` is not honoured —

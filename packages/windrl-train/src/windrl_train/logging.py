@@ -8,7 +8,7 @@ from mava.utils.logger import BaseLogger, LogEvent
 _WANDB_MODE_ENV = "WIND_RL_WANDB_MODE"
 _WDIR_ENV = "WIND_RL_WDIR"
 _DEFAULT_MODE = "online"
-_DEFAULT_WDIR = "~/.wind_rl"
+_DEFAULT_WDIR = "outputs"
 
 
 def _resolved_mode() -> str:
