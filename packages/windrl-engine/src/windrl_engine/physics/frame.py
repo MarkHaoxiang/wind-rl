@@ -3,10 +3,9 @@ from typing import Final
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int
 
-from windrl_engine.farm.turbine import HUB_HEIGHT, D
+from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
 
 GRID: Final = 3
-DISC_AREA_RADIUS: Final = 0.5 * D / 2
 
 Scalar = Float[Array, ""]
 Turbines = Float[Array, "turbines"]
@@ -63,13 +62,14 @@ def rotate_to_wind_frame(
 
 
 def rotor_grid(
-    x_rot: Turbines, y_rot: Turbines
+    x_rot: Turbines, y_rot: Turbines, *, turbine: TurbineSpec = DEFAULT_TURBINE
 ) -> tuple[RotorField, RotorField, RotorField]:
     """3x3 rotor grids: spanwise offset on axis -2, vertical (z=HH+offset) on axis -1."""
-    disc = jnp.linspace(-DISC_AREA_RADIUS, DISC_AREA_RADIUS, GRID)
+    disc_radius = 0.5 * turbine.rotor_diameter / 2
+    disc = jnp.linspace(-disc_radius, disc_radius, GRID)
     x_grid = jnp.broadcast_to(x_rot[:, None, None], (x_rot.shape[0], GRID, GRID))
     y_grid = y_rot[:, None, None] + disc[None, :, None]
-    z_grid = (HUB_HEIGHT + disc)[None, None, :] + jnp.zeros_like(x_grid)
+    z_grid = (turbine.hub_height + disc)[None, None, :] + jnp.zeros_like(x_grid)
     return x_grid, jnp.broadcast_to(y_grid, x_grid.shape), z_grid
 
 

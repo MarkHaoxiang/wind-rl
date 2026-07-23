@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from windrl_engine.farm.turbine import REF_DENSITY, power_interp, pP
+from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec, power_lookup
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.flow import AIR_DENSITY
 from windrl_engine.physics.frame import cosd
@@ -9,13 +9,16 @@ from windrl_engine.physics.solver import FlowSolution
 
 
 def turbine_powers(
-    u: Float[Array, "turbines grid grid"], yaw: Float[Array, "turbines"]
+    u: Float[Array, "turbines grid grid"],
+    yaw: Float[Array, "turbines"],
+    *,
+    turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> Float[Array, "turbines"]:
     """Per-turbine electrical power (W) from the cubic-mean rotor velocity (spec §6a)."""
     rotor_speed = jnp.cbrt(jnp.mean(u**3, axis=(1, 2)))
-    u_eff = (AIR_DENSITY / REF_DENSITY) ** (1 / 3) * rotor_speed
-    u_eff = u_eff * cosd(yaw) ** (pP / 3)
-    return power_interp(u_eff) * REF_DENSITY
+    u_eff = (AIR_DENSITY / turbine.ref_density) ** (1 / 3) * rotor_speed
+    u_eff = u_eff * cosd(yaw) ** (turbine.pP / 3)
+    return power_lookup(turbine, u_eff)
 
 
 def load_proxies(solution: FlowSolution) -> Float[Array, "turbines 4"]:

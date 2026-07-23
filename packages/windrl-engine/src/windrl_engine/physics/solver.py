@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from windrl_engine.farm.layout import FarmLayout
+from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.deficit import deficit_field
 from windrl_engine.physics.deflection import deflection_field, wake_added_yaw
@@ -54,20 +55,35 @@ class _Carry(NamedTuple):
 
 
 def solve_farm(
-    layout: FarmLayout, wind: WindCondition, yaw: Float[Array, "turbines"]
+    layout: FarmLayout,
+    wind: WindCondition,
+    yaw: Float[Array, "turbines"],
+    *,
+    fidelity: str = "floris",
+    turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> FlowSolution:
-    """Steady-state GCH wake solve; fields in original turbine order (spec §5)."""
+    """Steady-state GCH wake solve; fields in original turbine order (spec §5).
+
+    ``fidelity="corrected"`` (static; a separate jit specialization) drops two FLORIS
+    reference quirks: the rotor-plane self-interaction becomes a deterministic strict
+    self-exclusion (independent of ``x_i`` float rounding), and the yaw-added-recovery
+    TI update is applied before *both* the deflection and deficit calls (the reference
+    lets deflection see the stale TI). ``turbine`` selects the NREL-5MW library.
+    """
+    corrected = fidelity == "corrected"
     x_rot, y_rot = rotate_to_wind_frame(layout.x, layout.y, wind.direction)
-    x_grid, y_grid, z_grid = rotor_grid(x_rot, y_rot)
+    x_grid, y_grid, z_grid = rotor_grid(x_rot, y_rot, turbine=turbine)
     sorted_idx, unsorted_idx = upstream_order(x_rot)
 
     xs = x_grid[sorted_idx]
     ys = y_grid[sorted_idx]
     zs = z_grid[sorted_idx]
     yaw_s = yaw[sorted_idx]
-    u_initial, dudz_initial = initial_flow(zs, wind.speed)
+    u_initial, dudz_initial = initial_flow(zs, wind.speed, turbine=turbine)
 
-    x_i_all = rotor_plane_x(xs[:, 0, 0])
+    # corrected: x_i is exactly the turbine's own rotor-plane x (no mean-rounding
+    # trick), so the strict `delta_x > 0` transverse gate excludes only its own plane.
+    x_i_all = xs[:, 0, 0] if corrected else rotor_plane_x(xs[:, 0, 0])
     y_i_all = jnp.mean(ys, axis=(1, 2))
     uinf = jnp.mean(u_initial)
     n = xs.shape[0]
@@ -83,30 +99,58 @@ def solve_farm(
         yaw_i = yaw_s[i]
 
         rotor_speed = cubic_mean(u_i)
-        ct_i = effective_ct(rotor_speed, yaw_i)
+        ct_i = effective_ct(rotor_speed, yaw_i, turbine=turbine)
         a_i = axial_induction(ct_i, yaw_i)
 
-        added = wake_added_yaw(v_i, ys[i] - y_i, zs[i], uinf, rotor_speed, ct_i, a_i)
+        added = wake_added_yaw(
+            v_i, ys[i] - y_i, zs[i], uinf, rotor_speed, ct_i, a_i, turbine=turbine
+        )
         effective_yaw = yaw_i + added
 
-        deflection = deflection_field(xs, u_initial, x_i, effective_yaw, ti_i, ct_i)
         v_wake, w_wake = transverse_velocity(
-            xs, ys, zs, dudz_initial, uinf, rotor_speed, x_i, y_i, yaw_i, ct_i, a_i
+            xs,
+            ys,
+            zs,
+            dudz_initial,
+            uinf,
+            rotor_speed,
+            x_i,
+            y_i,
+            yaw_i,
+            ct_i,
+            a_i,
+            turbine=turbine,
+            self_exclude=corrected,
         )
 
         i_mixing = yaw_added_mixing(u_i, ti_i, v_i, w_i, v_wake[i], w_wake[i])
-        # FLORIS mutates turbulence_intensity_i in place, so the deficit sees the
-        # yaw-mixing-updated TI while the deflection above kept the old TI (spec §5.3).
+        # FLORIS mutates turbulence_intensity_i in place: the deficit always sees the
+        # yaw-mixing-updated TI; the reference lets the deflection keep the stale TI
+        # (spec §5.3), while `corrected` feeds both the updated value.
         ti = carry.turbulence_intensity.at[i].add(GCH_GAIN * i_mixing)
+        ti_deflection = ti[i] if corrected else ti_i
 
+        deflection = deflection_field(
+            xs, u_initial, x_i, effective_yaw, ti_deflection, ct_i, turbine=turbine
+        )
         deficit = deficit_field(
-            xs, ys, zs, u_initial, deflection, x_i, y_i, ct_i, yaw_i, ti[i]
+            xs,
+            ys,
+            zs,
+            u_initial,
+            deflection,
+            x_i,
+            y_i,
+            ct_i,
+            yaw_i,
+            ti[i],
+            turbine=turbine,
         )
         wake_field = jnp.hypot(carry.wake_field, deficit * u_initial)
 
-        wake_added_ti = crespo_hernandez(xs, x_i, a_i)
+        wake_added_ti = crespo_hernandez(xs, x_i, a_i, turbine=turbine)
         ti = wake_added_turbulence(
-            ti, deficit, u_initial, wake_added_ti, xs, ys, x_i, y_i
+            ti, deficit, u_initial, wake_added_ti, xs, ys, x_i, y_i, turbine=turbine
         )
 
         return _Carry(wake_field, carry.v + v_wake, carry.w + w_wake, ti)

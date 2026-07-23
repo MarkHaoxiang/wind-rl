@@ -672,3 +672,13 @@ default 500. No early termination, no reward-based done.
    for the GCH velocity model `gauss`.
 9. **Omit `pitch`/`torque` controls and the MPI/FastFarm interfaces** — the
    FLORIS interface only exposes `yaw`.
+10. **Optional `fidelity="corrected"` flag** (static; default `"floris"` is
+    bit-identical) removing three reference quirks stable across FLORIS 3.5/4.6.6:
+    deterministic rotor-plane self-exclusion (vs the `x_i` mean-rounding ULP gate),
+    consistent yaw-added-recovery TI ordering (deflection sees the updated TI, not
+    stale), and discrete duty-limited turbines holding (vs raw-zeroing mapping
+    `0 -> -step`). *(Added; owner review.)*
+11. **Optional `turbine="nrel5mw_v4"` library** (default `"nrel5mw_v3"` unchanged):
+    FLORIS 4.6.6 NREL-5MW (rotor_diameter 125.88, cosine-loss absolute-kW power
+    table) threaded as a `TurbineSpec` PyTree through the physics surface.
+    *(Added; owner review.)*

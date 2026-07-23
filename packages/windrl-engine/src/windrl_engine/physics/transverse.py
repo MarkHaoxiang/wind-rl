@@ -3,13 +3,12 @@ from typing import Final
 
 import jax.numpy as jnp
 
-from windrl_engine.farm.turbine import HUB_HEIGHT, TSR, D
+from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
 from windrl_engine.physics.deflection import EPS_GAIN, NUM_EPS
 from windrl_engine.physics.flow import SHEAR
 from windrl_engine.physics.frame import RotorField, Scalar, cosd, sind
 
 KAPPA: Final = 0.41
-MIXING_LENGTH: Final = D / 8
 
 
 def transverse_velocity(
@@ -24,8 +23,20 @@ def transverse_velocity(
     yaw_i: Scalar,
     ct_i: Scalar,
     a_i: Scalar,
+    *,
+    turbine: TurbineSpec = DEFAULT_TURBINE,
+    self_exclude: bool = False,
 ) -> tuple[RotorField, RotorField]:
-    """Spanwise/vertical velocities (v, w) from turbine `i`'s 3 real + 3 mirror vortices."""
+    """Spanwise/vertical velocities (v, w) from turbine `i`'s 3 real + 3 mirror vortices.
+
+    ``self_exclude`` (corrected fidelity): gate the source planes with ``delta_x > 0``
+    so turbine `i`'s own rotor plane is deterministically excluded, independent of the
+    floating-point rounding of ``x_i`` (the FLORIS ULP quirk uses ``delta_x >= 0``).
+    """
+    D = turbine.rotor_diameter
+    HUB_HEIGHT = turbine.hub_height
+    TSR = turbine.tsr
+    mixing_length = D / 8
     eps = EPS_GAIN * D
 
     vel_top = ((HUB_HEIGHT + D / 2) / HUB_HEIGHT) ** SHEAR
@@ -36,7 +47,7 @@ def transverse_velocity(
     )
     gamma_wake_rotation = 0.25 * 2 * math.pi * D * (a_i - a_i**2) * rotor_speed_i / TSR
 
-    lm = KAPPA * z / (1 + KAPPA * z / MIXING_LENGTH)
+    lm = KAPPA * z / (1 + KAPPA * z / mixing_length)
     nu = lm**2 * jnp.abs(dudz_initial)
     delta_x = x - x_i
     decay = eps**2 / (4 * nu * delta_x / uinf + eps**2)
@@ -91,7 +102,8 @@ def transverse_velocity(
 
     v = v1 + v2 + v3 + v4 + v5 + v6
     w = w1 + w2 + w3 + w4 + w5 + w6
-    v = jnp.where(delta_x >= 0.0, v, 0.0)
-    w = jnp.where(delta_x >= 0.0, w, 0.0)
+    gate = delta_x > 0.0 if self_exclude else delta_x >= 0.0
+    v = jnp.where(gate, v, 0.0)
+    w = jnp.where(gate, w, 0.0)
     w = jnp.where(w >= 0.0, w, 0.0)
     return v, w

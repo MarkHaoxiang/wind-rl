@@ -2,7 +2,7 @@ from typing import Final
 
 import jax.numpy as jnp
 
-from windrl_engine.farm.turbine import D
+from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
 from windrl_engine.physics.flow import AMBIENT_TI
 from windrl_engine.physics.frame import GRID, RotorField, RotorPlane, Scalar
 
@@ -12,13 +12,16 @@ CRESPO_AI: Final = 0.8
 CRESPO_DOWNSTREAM: Final = -0.32
 
 GCH_GAIN: Final = 2.0
-LATERAL_GATE: Final = 2.0 * D
-DOWNSTREAM_INFLUENCE_LENGTH: Final = 15.0 * D
+LATERAL_GATE_DIAMETERS: Final = 2.0
+DOWNSTREAM_INFLUENCE_DIAMETERS: Final = 15.0
 AREA_OVERLAP_THRESHOLD: Final = 0.05
 
 
-def crespo_hernandez(x: RotorField, x_i: Scalar, a_i: Scalar) -> RotorField:
+def crespo_hernandez(
+    x: RotorField, x_i: Scalar, a_i: Scalar, *, turbine: TurbineSpec = DEFAULT_TURBINE
+) -> RotorField:
     """Crespo-Hernandez wake-added turbulence intensity from turbine `i`."""
+    D = turbine.rotor_diameter
     delta_x = x - x_i
     upstream_mask = delta_x <= 0.1
     downstream_mask = delta_x > -0.1
@@ -61,8 +64,11 @@ def wake_added_turbulence(
     y: RotorField,
     x_i: Scalar,
     y_i: Scalar,
+    *,
+    turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> RotorField:
     """Fold area-overlap-weighted wake TI into the per-turbine field via elementwise max."""
+    D = turbine.rotor_diameter
     area_overlap = jnp.sum(
         deficit * u_initial > AREA_OVERLAP_THRESHOLD, axis=(-2, -1)
     ) / (GRID * GRID)
@@ -70,7 +76,7 @@ def wake_added_turbulence(
         area_overlap[..., None, None]
         * jnp.nan_to_num(wake_added_ti, posinf=0.0)
         * (x > x_i)
-        * (jnp.abs(y_i - y) < LATERAL_GATE)
-        * (x <= DOWNSTREAM_INFLUENCE_LENGTH + x_i)
+        * (jnp.abs(y_i - y) < LATERAL_GATE_DIAMETERS * D)
+        * (x <= DOWNSTREAM_INFLUENCE_DIAMETERS * D + x_i)
     )
     return jnp.maximum(jnp.sqrt(ti_added**2 + AMBIENT_TI**2), ti)

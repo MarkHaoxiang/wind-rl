@@ -6,11 +6,12 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, Key
 
-from windrl_engine.env.actions import YAW_LIMIT, ControlMode, apply_action
+from windrl_engine.env.actions import YAW_LIMIT, ControlMode, Fidelity, apply_action
 from windrl_engine.env.config import WindFarmEnvConfig
 from windrl_engine.env.spaces import Box, MultiDiscrete
 from windrl_engine.farm.layout import FarmLayout
 from windrl_engine.farm.state import FarmState, make_state
+from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
 from windrl_engine.farm.wind import WindCondition, sample_wind
 from windrl_engine.physics.power import load_proxies, local_wind, turbine_powers
 from windrl_engine.physics.solver import solve_farm
@@ -50,11 +51,16 @@ def reset(
     layout: FarmLayout,
     key: Key[Array, ""],
     wind: WindCondition | None = None,
+    *,
+    fidelity: Fidelity = "floris",
+    turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> tuple[FarmState, Observation]:
     wind_key, state_key = jax.random.split(key)
     resolved = sample_wind(wind_key) if wind is None else wind
     state = make_state(layout, resolved, state_key)
-    solution = solve_farm(layout, resolved, state.yaw)
+    solution = solve_farm(
+        layout, resolved, state.yaw, fidelity=fidelity, turbine=turbine
+    )
     speed, direction = local_wind(solution, resolved)
     return state, _observation(state.yaw, resolved, speed, direction)
 
@@ -80,6 +86,8 @@ def _step_core(
     load_coef: float,
     horizon: int,
     control_mode: ControlMode,
+    fidelity: Fidelity = "floris",
+    turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
     freestream_speed = state.wind.speed
     applied = apply_action(
@@ -89,9 +97,12 @@ def _step_core(
         action,
         yaw_step=yaw_step,
         control_mode=control_mode,
+        fidelity=fidelity,
     )
-    solution = solve_farm(layout, state.wind, applied.yaw)
-    powers = turbine_powers(solution.u, applied.yaw)
+    solution = solve_farm(
+        layout, state.wind, applied.yaw, fidelity=fidelity, turbine=turbine
+    )
+    powers = turbine_powers(solution.u, applied.yaw, turbine=turbine)
     loads = load_proxies(solution)
     speed, direction = local_wind(solution, state.wind)
 
@@ -115,6 +126,8 @@ def step(
     yaw_step: float,
     load_coef: float,
     horizon: int,
+    fidelity: Fidelity = "floris",
+    turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
     return _step_core(
         layout,
@@ -124,6 +137,8 @@ def step(
         load_coef=load_coef,
         horizon=horizon,
         control_mode="continuous",
+        fidelity=fidelity,
+        turbine=turbine,
     )
 
 
@@ -163,11 +178,13 @@ def _batched_step(
     state: FarmState,
     actions: Float[Array, "envs turbines"],
     key: Key[Array, ""],
+    turbine: TurbineSpec,
     *,
     yaw_step: float,
     load_coef: float,
     horizon: int,
     control_mode: ControlMode,
+    fidelity: Fidelity,
 ) -> _StepOut:
     def one(
         st: FarmState, act: Float[Array, "turbines"]
@@ -180,6 +197,8 @@ def _batched_step(
             load_coef=load_coef,
             horizon=horizon,
             control_mode=control_mode,
+            fidelity=fidelity,
+            turbine=turbine,
         )
 
     new_state, obs, reward, truncated = jax.vmap(one)(state, actions)
@@ -190,7 +209,9 @@ def _batched_step(
     ) -> tuple[FarmState, Observation]:
         st, ob = operand
         keys = jax.random.split(reset_key, truncated.shape[0])
-        fresh_state, fresh_obs = jax.vmap(lambda k: reset(layout, k))(keys)
+        fresh_state, fresh_obs = jax.vmap(
+            lambda k: reset(layout, k, fidelity=fidelity, turbine=turbine)
+        )(keys)
         return _tree_where_lane(truncated, (fresh_state, fresh_obs), (st, ob))
 
     def no_reset(
@@ -205,7 +226,19 @@ def _batched_step(
     return _StepOut(reset_state, reset_obs, reward, truncated, key)
 
 
-_STEP_STATIC: Final = ("yaw_step", "load_coef", "horizon", "control_mode")
+def _batched_reset(
+    layout: FarmLayout,
+    keys: Key[Array, "envs"],
+    turbine: TurbineSpec,
+    *,
+    fidelity: Fidelity,
+) -> tuple[FarmState, Observation]:
+    return jax.vmap(lambda k: reset(layout, k, fidelity=fidelity, turbine=turbine))(
+        keys
+    )
+
+
+_STEP_STATIC: Final = ("yaw_step", "load_coef", "horizon", "control_mode", "fidelity")
 
 
 class _StepStatics(TypedDict):
@@ -213,6 +246,7 @@ class _StepStatics(TypedDict):
     load_coef: float
     horizon: int
     control_mode: ControlMode
+    fidelity: Fidelity
 
 
 class BatchedWindFarmEnv:
@@ -233,7 +267,11 @@ class BatchedWindFarmEnv:
         self.load_coef = config.load_coef
         self.horizon = config.horizon
         self.control_mode = config.control_mode
-        self._reset_jit = jax.jit(jax.vmap(reset, in_axes=(None, 0)))
+        self.fidelity = config.fidelity
+        self.turbine = config.build_turbine()
+        self._reset_jit = jax.jit(
+            functools.partial(_batched_reset, fidelity=self.fidelity)
+        )
         self._step_jit = jax.jit(
             functools.partial(_batched_step, **self._step_kwargs()),
         )
@@ -247,13 +285,15 @@ class BatchedWindFarmEnv:
             "load_coef": self.load_coef,
             "horizon": self.horizon,
             "control_mode": self.control_mode,
+            "fidelity": self.fidelity,
         }
 
     def reset(self, key: Key[Array, ""]) -> Observation:
         key, self._key = jax.random.split(key)
         keys = jax.random.split(key, self.n_envs)
         state, obs = cast(
-            tuple[FarmState, Observation], self._reset_jit(self.layout, keys)
+            tuple[FarmState, Observation],
+            self._reset_jit(self.layout, keys, self.turbine),
         )
         self._state, self._obs = state, obs
         return obs
@@ -265,7 +305,8 @@ class BatchedWindFarmEnv:
             raise RuntimeError("call reset before step")
         self._key, step_key = jax.random.split(self._key)
         out = cast(
-            _StepOut, self._step_jit(self.layout, self._state, actions, step_key)
+            _StepOut,
+            self._step_jit(self.layout, self._state, actions, step_key, self.turbine),
         )
         self._state, self._obs = out.state, out.obs
         return out.obs, out.reward, out.truncated
@@ -296,6 +337,7 @@ class BatchedWindFarmEnv:
                 n_steps,
                 actor,
                 self.n_turbines,
+                self.turbine,
                 **self._step_kwargs(),
             ),
         )
@@ -331,11 +373,13 @@ def _rollout_core(
     n_steps: int,
     actor: Actor | None,
     n_turbines: int,
+    turbine: TurbineSpec,
     *,
     yaw_step: float,
     load_coef: float,
     horizon: int,
     control_mode: ControlMode,
+    fidelity: Fidelity,
 ) -> tuple[FarmState, Observation, Float[Array, "steps envs"]]:
     n_envs = state.step_count.shape[0]
     idle = 1.0 if control_mode == "discrete" else 0.0
@@ -352,10 +396,12 @@ def _rollout_core(
             st,
             actions,
             env_key,
+            turbine,
             yaw_step=yaw_step,
             load_coef=load_coef,
             horizon=horizon,
             control_mode=control_mode,
+            fidelity=fidelity,
         )
         return (out.state, out.obs, out.key, sample_key), out.reward
 

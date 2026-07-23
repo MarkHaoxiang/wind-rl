@@ -3,7 +3,7 @@ from typing import Final
 
 import jax.numpy as jnp
 
-from windrl_engine.farm.turbine import HUB_HEIGHT, TSR, D
+from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
 from windrl_engine.physics.flow import SHEAR
 from windrl_engine.physics.frame import (
     QueryField,
@@ -29,8 +29,11 @@ def deflection_field(
     yaw_i: Scalar,
     ti_i: TurbineTI,
     ct_i: Scalar,
+    *,
+    turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> QueryField:
     """Lateral wake-center deflection (m) of turbine `i`, opposite yaw sign convention."""
+    D = turbine.rotor_diameter
     yaw = -1.0 * yaw_i
 
     uR = (
@@ -97,8 +100,13 @@ def wake_added_yaw(
     rotor_speed_i: Scalar,
     ct_i: Scalar,
     a_i: Scalar,
+    *,
+    turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> Scalar:
     """Secondary-steering effective yaw (deg) that reproduces the induced spanwise velocity."""
+    D = turbine.rotor_diameter
+    HUB_HEIGHT = turbine.hub_height
+    TSR = turbine.tsr
     eps = EPS_GAIN * D
 
     vel_top = ((HUB_HEIGHT + D / 2) / HUB_HEIGHT) ** SHEAR
