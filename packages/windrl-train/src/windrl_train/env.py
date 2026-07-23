@@ -35,14 +35,35 @@ from windrl_engine.farm.wind import WindCondition
 
 # Per-agent (per-turbine) feature vector packed into ``agents_view[i]``:
 #   [ own_yaw_deg, local_wind_speed, local_wind_direction,
-#     freestream_speed, freestream_direction ]
+#     freestream_speed, freestream_direction, norm_x, norm_y ]
 # Own yaw + local wind (∛mean-u³ speed, deg direction) give the turbine its
 # controllable state and wake exposure; the two freestream globals are shared.
-_AGENT_FEATURES = 5
-_FEATURE_LOW = jnp.asarray([-YAW_LIMIT, 0.0, 0.0, 0.0, 0.0])
+# The trailing (norm_x, norm_y) are the turbine's world position centred on the
+# layout bbox and divided by its larger side, giving coordinates in ~[-0.5, 0.5]
+# for the GCN torso to build a pairwise-distance graph; MLP torsos ignore the
+# extra channels. The first five features keep their original order.
+_AGENT_FEATURES = 7
+_FEATURE_LOW = jnp.asarray([-YAW_LIMIT, 0.0, 0.0, 0.0, 0.0, -1.0, -1.0])
 _FEATURE_HIGH = jnp.asarray(
-    [YAW_LIMIT, WIND_SPEED_MAX, WIND_DIRECTION_MAX, WIND_SPEED_MAX, WIND_DIRECTION_MAX]
+    [
+        YAW_LIMIT,
+        WIND_SPEED_MAX,
+        WIND_DIRECTION_MAX,
+        WIND_SPEED_MAX,
+        WIND_DIRECTION_MAX,
+        1.0,
+        1.0,
+    ]
 )
+
+
+def _normalize_positions(x: chex.Array, y: chex.Array) -> chex.Array:
+    """Centre turbine (x, y) on the layout bbox, scale by its larger side."""
+    positions = jnp.stack([x, y], axis=-1)
+    center = (positions.max(axis=0) + positions.min(axis=0)) / 2.0
+    extent = (positions.max(axis=0) - positions.min(axis=0)).max()
+    scale = jnp.where(extent > 0.0, extent, 1.0)
+    return (positions - center) / scale
 
 
 class WindFarm(Environment):
@@ -71,6 +92,7 @@ class WindFarm(Environment):
             else None
         )
         self.layout = self._core_config.build_layout()
+        self._norm_positions = _normalize_positions(self.layout.x, self.layout.y)
         self.add_global_state = add_global_state
         self.num_agents = int(self.layout.x.shape[0])
         self.time_limit = self._core_config.horizon
@@ -84,7 +106,9 @@ class WindFarm(Environment):
     ) -> Observation | ObservationGlobalState:
         per_agent = jnp.stack([obs.yaw, obs.wind_speed, obs.wind_direction], axis=-1)
         globals_ = jnp.broadcast_to(obs.freewind, (self.num_agents, 2))
-        agents_view = jnp.concatenate([per_agent, globals_], axis=-1)
+        agents_view = jnp.concatenate(
+            [per_agent, globals_, self._norm_positions], axis=-1
+        )
         action_mask = jnp.ones((self.num_agents, self.action_dim), dtype=bool)
         step_count = jnp.repeat(state.step_count, self.num_agents)
         if self.add_global_state:

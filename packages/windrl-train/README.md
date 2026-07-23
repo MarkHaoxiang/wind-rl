@@ -59,6 +59,27 @@ Common Hydra overrides: `env.kwargs.layout` (`turb3_row1` | `ablaincourt` |
 `env.kwargs.load_coef`, `arch.num_envs`, `system.total_timesteps`. Logging is
 Mava's own console logger; enable others via `logger.loggers.<name>.enabled`.
 
+## Networks
+
+`network=mlp` (Mava's per-agent MLP) is the default. `network=gcn` selects the
+permutation-equivariant GCN torsos in `windrl_train.networks`: the actor builds
+a dense row-normalized Gaussian adjacency from the turbine `(x, y)` (the last
+two `agents_view` channels, added by the env wrapper) and runs 2 residual
+message-passing rounds shared across turbines; the centralised critic runs the
+same GCN over the global state and mean-pools to a permutation-invariant value.
+Append `network=gcn` to any run, e.g. the smoke command above.
+
+The equivariance property (permuting turbines permutes actor means identically,
+leaves the critic value unchanged) is checked in `tests/test_equivariance.py`:
+
+```bash
+# standalone
+JAX_PLATFORMS=cpu packages/windrl-train/.venv/bin/python \
+  packages/windrl-train/tests/test_equivariance.py
+# or under pytest
+cd packages/windrl-train && JAX_PLATFORMS=cpu ./.venv/bin/python -m pytest tests
+```
+
 ## Checks
 
 `ruff`/`ruff format` run from the root venv
