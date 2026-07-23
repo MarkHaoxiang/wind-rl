@@ -31,6 +31,7 @@ from windrl_engine.env.env import (
     step as core_step,
 )
 from windrl_engine.farm.state import FarmState
+from windrl_engine.farm.wind import WindCondition
 
 # Per-agent (per-turbine) feature vector packed into ``agents_view[i]``:
 #   [ own_yaw_deg, local_wind_speed, local_wind_direction,
@@ -57,6 +58,18 @@ class WindFarm(Environment):
     def __init__(self, env_config: DictConfig, add_global_state: bool = False) -> None:
         kwargs = OmegaConf.to_container(env_config.kwargs, resolve=True)
         self._core_config = WindFarmEnvConfig(control_mode="continuous", **kwargs)  # type: ignore[arg-type]
+        # Optional constant free-stream wind (wrapper-level, not a WindFarmEnvConfig
+        # field): fixes the Scenario-I aligned-wind regime so wake-steering headroom
+        # is deterministic. Absent -> the engine samples wind per reset (Scenario II).
+        fixed = OmegaConf.select(env_config, "fixed_wind")
+        self._fixed_wind = (
+            WindCondition(
+                speed=jnp.asarray(float(fixed.speed)),
+                direction=jnp.asarray(float(fixed.direction)),
+            )
+            if fixed is not None
+            else None
+        )
         self.layout = self._core_config.build_layout()
         self.add_global_state = add_global_state
         self.num_agents = int(self.layout.x.shape[0])
@@ -87,7 +100,7 @@ class WindFarm(Environment):
         )
 
     def reset(self, key: chex.PRNGKey) -> tuple[FarmState, TimeStep]:
-        state, obs = core_reset(self.layout, key)
+        state, obs = core_reset(self.layout, key, wind=self._fixed_wind)
         timestep = restart(
             self._observation(obs, state),
             shape=(self.num_agents,),

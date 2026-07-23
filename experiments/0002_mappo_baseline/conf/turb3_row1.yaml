@@ -1,0 +1,36 @@
+# M1 MAPPO baseline: turb3_row1, continuous yaw, fixed layout, fixed aligned wind
+# (Scenario-I wake-steering regime). See report.md for why the wind is fixed.
+variant: turb3_row1
+seeds: [0, 1]
+
+env:
+  layout: turb3_row1
+  horizon: 100
+  load_coef: 0.1
+  yaw_step: 5.0
+  # Aligned free-stream wind. Fixed so wake-steering headroom is deterministic and
+  # zero-yaw is beatable; under sampled wind zero-yaw is near-optimal (see report).
+  fixed_wind:
+    speed: 6.0
+    direction: 270.0
+
+train:
+  num_envs: 16
+  rollout_length: 128
+  update_batch_size: 1
+  num_minibatches: 2
+  ppo_epochs: 4
+  ent_coef: 0.0
+  actor_lr: 2.5e-4
+  critic_lr: 2.5e-4
+  num_updates: 600
+  num_evaluation: 25
+  num_eval_episodes: 8
+  num_absolute_metric_eval_episodes: 32
+  evaluation_greedy: true
+
+verdict:
+  # trained best-policy return must exceed the untrained (early-window) return by
+  # this factor (learning) and the zero-yaw baseline by this factor (steering gain).
+  learning_ratio: 1.05
+  power_gain_ratio: 1.05
