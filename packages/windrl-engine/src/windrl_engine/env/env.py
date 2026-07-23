@@ -16,8 +16,8 @@ from windrl_engine.farm.wind import WindCondition, sample_wind
 from windrl_engine.physics.power import load_proxies, local_wind, turbine_powers
 from windrl_engine.physics.solver import solve_farm
 
-WIND_SPEED_MAX: Final = 28.0  # DEFAULT_BOUNDS["wind_speed"]
-WIND_DIRECTION_MAX: Final = 360.0  # DEFAULT_BOUNDS["wind_direction"]
+WIND_SPEED_MAX: Final = 28.0  # m/s, matches WFCRL's default wind-speed bound
+WIND_DIRECTION_MAX: Final = 360.0  # deg, matches WFCRL's default wind-direction bound
 
 
 class Observation(NamedTuple):
@@ -263,12 +263,12 @@ class _StepStatics(TypedDict):
 class BatchedWindFarmEnv:
     """A batch of wind farms behind a jointly-stepped parallel API.
 
-    Multi-agent view (design #8): the turbine axis *is* the agent axis, so
-    observations are per-turbine ``(envs, turbines)`` and the scalar reward is
-    broadcast per turbine by the consumer. Terminated lanes auto-reset on device
-    with freshly sampled wind. Co-design seam: ``reset`` accepts optional per-env
-    ``layouts`` (leading ``(envs,)`` axis) so each lane can solve its own layout,
-    fixed between explicit resets; default shared-layout behavior is unchanged.
+    The turbine axis is the multi-agent axis: observations and actions are
+    per-turbine with a leading ``(envs, turbines)`` shape, and the scalar
+    per-env reward is broadcast per turbine by the consumer. A lane that hits
+    its horizon auto-resets on device with freshly sampled wind. ``reset``
+    optionally takes per-env ``layouts`` (leading ``(envs,)`` axis), letting
+    each lane solve its own fixed layout instead of the shared default.
     """
 
     def __init__(self, config: WindFarmEnvConfig) -> None:

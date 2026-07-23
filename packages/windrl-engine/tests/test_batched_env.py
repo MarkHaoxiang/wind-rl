@@ -1,11 +1,4 @@
-"""BatchedWindFarmEnv: batching, per-lane PRNG, auto-reset, rollout, control modes.
-
-BatchedWindFarmEnv treats the turbine axis as the multi-agent axis, exposed
-via a `jit(vmap(...))` surface with device-side auto-reset and `lax.scan`
-rollout; expectations here are cross-checked against the single-farm
-functional core (`reset`/`step`), never against the batched implementation's
-own internals.
-"""
+"""BatchedWindFarmEnv behavior, checked against the single-farm reset/step core."""
 
 import jax
 import jax.numpy as jnp
@@ -20,18 +13,15 @@ _LAYOUT = [(0.0, 0.0), (504.0, 0.0)]
 
 
 def _lane_reset_keys(seed_key: jax.Array, n_envs: int) -> jax.Array:
-    """Replicates `BatchedWindFarmEnv.reset`'s own key split (env/env.py)."""
+    # Mirrors BatchedWindFarmEnv.reset's own key derivation.
     internal_key, _ = jax.random.split(seed_key)
     return jax.random.split(internal_key, n_envs)
 
 
 def _per_env_layouts() -> FarmLayout:
-    """Three distinct 2-turbine layouts stacked on a leading (envs,) axis.
-
-    Same turbine count as `_LAYOUT` (config-shared layout) so only the positions
-    differ per lane; the downstream turbine's x varies so each lane's wake solve
-    -- and hence its local wind / power -- is genuinely lane-specific.
-    """
+    # Same turbine count as _LAYOUT so only positions differ per lane; the
+    # downstream turbine's x varies so each lane's wake solve -- and hence its
+    # local wind/power -- is genuinely lane-specific.
     x = jnp.asarray([[0.0, 504.0], [0.0, 630.0], [0.0, 756.0]])
     y = jnp.zeros((3, 2))
     return FarmLayout(x=x, y=y)
@@ -161,10 +151,10 @@ def test_rollout_matches_a_python_loop_of_step_with_the_same_actor() -> None:
 
 
 def test_discrete_control_mode_matches_the_equivalent_continuous_delta_stream() -> None:
-    # yaw_step is kept small (<1.8) so the §4a duty-cycle limiter's zeroed-
-    # action semantics never trigger: a zeroed *discrete index* maps to
-    # -yaw_step (env/actions.py), not 0, so it would break equivalence with
-    # the continuous stream's zeroed-*delta*-maps-to-0 semantics if it fired.
+    # yaw_step is kept small (<1.8) so the duty-cycle limiter's zeroed-action
+    # semantics never trigger: a zeroed *discrete index* maps to -yaw_step
+    # (env/actions.py), not 0, so it would break equivalence with the
+    # continuous stream's zeroed-*delta*-maps-to-0 semantics if it fired.
     yaw_step = 1.0
     horizon = 50
     discrete_env = BatchedWindFarmEnv(

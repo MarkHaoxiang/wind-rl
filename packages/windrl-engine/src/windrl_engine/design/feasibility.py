@@ -59,20 +59,18 @@ def project_feasible(
 ) -> Float[Array, "turbines 2"]:
     """Push `coords` toward the feasible set: pairwise repulsion then bounds clip.
 
-    Each iteration moves every turbine half of every min-spacing violation along
-    the separating axis, then clips to the rectangle. Repulsion targets
-    ``min_spacing * (1 + tol)`` rather than ``min_spacing`` exactly: a bare
-    target settles pairs on the constraint boundary where floating-point rounding
-    lands them a few ULPs *below* it and fails the strict ``>=`` feasibility
-    check, so the small overshoot is what makes convergence robust. Convergence
-    caveat: the move is a fixed-count local relaxation, not an exact projection —
-    summed repulsion from many neighbours can overshoot and a corner clip can
-    reintroduce a violation, so a large enough `iters` (and a genuinely
-    satisfiable site) is the caller's responsibility. Fully jit/vmap-safe: dense
-    ``(N, N)`` math, no ragged ops, static iteration structure.
+    A fixed-count local relaxation, not an exact projection: summed repulsion
+    from many neighbours can overshoot and a corner clip can reintroduce a
+    violation, so a large enough `iters` (and a genuinely satisfiable site) is
+    the caller's responsibility. Dense ``(N, N)`` math with no ragged ops and a
+    static iteration count, so it is jit/vmap-safe.
     """
     n = coords.shape[0]
     not_self = ~jnp.eye(n, dtype=bool)
+    # Target min_spacing * (1 + tol), not min_spacing exactly: a bare target
+    # settles pairs on the constraint boundary where floating-point rounding
+    # lands them a few ULPs *below* it, failing the strict `>=` feasibility
+    # check, so the small overshoot is what makes convergence robust.
     target = site.min_spacing * (1.0 + tol)
 
     def step(_: Array, c: Float[Array, "turbines 2"]) -> Float[Array, "turbines 2"]:

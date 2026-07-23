@@ -1,17 +1,4 @@
-"""Differential agreement of windrl_engine's wake solve against frozen FLORIS goldens.
-
-The reference is FLORIS 3.5 driven through WFCRL's shipped GCH template (secondary
-steering / yaw-added recovery / transverse velocities on, crespo constant 0.5),
-captured once into ``goldens/floris_v3.5.npz`` by
-``generate_floris35_goldens.py`` and re-verified against the live WFCRL oracle at
-freeze time. WFCRL itself is no longer a dependency, so this test is CI-safe: it
-loads the golden arrays (u/v/w/TI/powers + layout coords per case) rather than
-building any FLORIS object. Both stacks run float64; the spec targets <1e-10
-relative, so 1e-9 leaves one order of margin.
-
-A second test checks the v4.6.6 turbine model against ``goldens/floris_v4.6.6.npz``
-(FLORIS 4.6.6 "defaults": byte-identical wake params, cosine-loss nrel_5MW).
-"""
+"""Differential agreement of windrl_engine's wake solve against frozen FLORIS 3.5/4.6.6 goldens."""
 
 from pathlib import Path
 
@@ -25,6 +12,13 @@ from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import solve_farm
 
+# Golden arrays (u/v/w/TI/powers + layout coords per case) were captured once
+# from FLORIS 3.5 driven through WFCRL's shipped GCH template (secondary
+# steering / yaw-added recovery / transverse velocities on, crespo_hernandez
+# constant 0.5) by generate_floris35_goldens.py, and re-verified against the
+# live WFCRL oracle at freeze time; loading them here keeps this module
+# CI-safe (no FLORIS/wfcrl import). Both stacks run float64 at ~1e-10
+# precision, so 1e-9 leaves an order of margin.
 RTOL = 1e-9
 GOLDENS = Path(__file__).parent / "goldens"
 
@@ -109,6 +103,8 @@ def test_row3_270_8_zeroyaw_regression_anchor():
     )
 
 
+# FLORIS 4.6.6 "defaults" config: byte-identical wake params to the v3.5 GCH
+# template above; only the built-in nrel_5MW turbine model differs.
 # (golden case id, layout builder, wind direction, wind speed, yaw)
 V4_CASES = [
     ("row3_270_8_flat", turb3_row1, 270.0, 8.0, [0.0, 0.0, 0.0]),

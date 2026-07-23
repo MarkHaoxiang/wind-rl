@@ -10,14 +10,13 @@ from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import solve_farm
 
-# Rotor grid z-offsets (spec §5.1): disc_grid = linspace(-31.5, 31.5, 3), and
+# Rotor grid z-offsets, matching FLORIS's disc_grid = linspace(-31.5, 31.5, 3);
 # the grid is centered on hub height (not the tower base) -- z_grid = HH + disc.
 _GRID_Z = HUB_HEIGHT + jnp.asarray([-0.25 * D, 0.0, 0.25 * D])
 RATED_POWER_W = 5.1e6
 
 
 def _shear_ceiling(speed: jax.Array) -> jax.Array:
-    """Freestream shear profile u(z) = ws·(z/HH)^0.12 (spec §5.2), per grid row."""
     return speed * (_GRID_Z / HUB_HEIGHT) ** 0.12
 
 

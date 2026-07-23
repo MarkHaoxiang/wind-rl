@@ -23,8 +23,8 @@ def make_state(
         yaw=zeros,
         yaw_accumulator=zeros,
         # WFCRL's reset advances _num_iter 0->1 via a zero-yaw burn-in solve, so the
-        # reset-produced state already counts as step 1 (spec §8); horizon-1 agent
-        # steps follow before truncation.
+        # reset-produced state already counts as step 1; horizon-1 agent steps follow
+        # before truncation.
         step_count=jnp.asarray(1),
         wind=wind,
         key=key,

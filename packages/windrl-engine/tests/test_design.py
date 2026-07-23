@@ -1,12 +1,4 @@
-"""Designer layer: feasibility predicates, projection, and baseline designers.
-
-Written against the pinned `windrl_engine.design` contract:
-`Designer = (key, batch) -> (batch, turbines, 2)`; `SiteSpec` a rectangle
-`[0, x_extent] x [0, y_extent]` plus `min_spacing`; the `min_spacing_satisfied` /
-`in_bounds` predicates; `project_feasible`; and the `fixed` / `random_uniform`
-baseline designers. Assertions state feasibility as a real invariant (100% over a
-batch), pin determinism, and check the predicates against hand-computed distances.
-"""
+"""Designer layer tests: feasibility predicates, projection, and baseline designers."""
 
 import jax
 import jax.numpy as jnp

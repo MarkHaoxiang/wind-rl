@@ -34,13 +34,13 @@ class FlowSolution(NamedTuple):
 
 
 def rotor_plane_x(xc: Float[Array, "turbines"]) -> Float[Array, "turbines"]:
-    """Rotor-plane streamwise x reproducing FLORIS's np.mean to 1 ULP (spec §5.3)."""
+    """Rotor-plane streamwise x reproducing FLORIS's np.mean to 1 ULP."""
     # x is constant over the rotor plane, so FLORIS's x_i = np.mean of nine identical
     # values, which rounds to x or x+ulp; that one-ulp choice decides the transverse
-    # source-plane `delta_x >= 0` gate (spec §5.3). np.mean's pairwise sum is
-    # round(9x), so `e1` is the exact residual 9*x - round(9x): the two subtractions
-    # are Sterbenz-exact (8*x is exact), hence FMA-invariant and identical under jit
-    # and vmap. np.mean rounds up (dropping the self plane) exactly when e1 < -4.5*ulp.
+    # source-plane `delta_x >= 0` gate. np.mean's pairwise sum is round(9x), so `e1`
+    # is the exact residual 9*x - round(9x): the two subtractions are Sterbenz-exact
+    # (8*x is exact), hence FMA-invariant and identical under jit and vmap. np.mean
+    # rounds up (dropping the self plane) exactly when e1 < -4.5*ulp.
     p = 9.0 * xc
     e1 = (8.0 * xc - p) + xc
     ulp = jnp.nextafter(xc, jnp.inf) - xc
@@ -62,7 +62,7 @@ def solve_farm(
     fidelity: str = "floris",
     turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> FlowSolution:
-    """Steady-state GCH wake solve; fields in original turbine order (spec §5).
+    """Steady-state GCH wake solve; fields in original turbine order.
 
     ``fidelity="corrected"`` (static; a separate jit specialization) drops two FLORIS
     reference quirks: the rotor-plane self-interaction becomes a deterministic strict
@@ -125,8 +125,8 @@ def solve_farm(
 
         i_mixing = yaw_added_mixing(u_i, ti_i, v_i, w_i, v_wake[i], w_wake[i])
         # FLORIS mutates turbulence_intensity_i in place: the deficit always sees the
-        # yaw-mixing-updated TI; the reference lets the deflection keep the stale TI
-        # (spec §5.3), while `corrected` feeds both the updated value.
+        # yaw-mixing-updated TI; the reference lets the deflection keep the stale TI,
+        # while `corrected` feeds both the updated value.
         ti = carry.turbulence_intensity.at[i].add(GCH_GAIN * i_mixing)
         ti_deflection = ti[i] if corrected else ti_i
 

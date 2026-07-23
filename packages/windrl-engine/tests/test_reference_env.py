@@ -1,18 +1,4 @@
-"""Differential agreement of windrl_engine's env against frozen WFCRL goldens.
-
-The reference is WFCRL's central multi-agent env (FLORIS 3.5 backend), captured
-once into ``goldens/wfcrl_env_trajectories.npz`` by
-``generate_wfcrl_env_goldens.py`` (which is no longer runnable -- see its
-docstring). Each golden case stores the reset wind + yaw, the exact seeded
-delta-action stream, per-step observations/rewards/truncation, and the control
-config (yaw step, load coef, horizon) that was read live off the WFCRL env. This
-test replays the stored deltas through ``windrl_engine`` and asserts parity, so
-it is CI-safe: WFCRL is never imported.
-
-WFCRL rounds the integrated yaw through float32 at the env boundary (spec §2)
-while windrl_engine stays float64, so env-level quantities agree to ~1e-6
-relative, not the 1e-9 of the raw solve.
-"""
+"""Differential agreement of windrl_engine's env against frozen WFCRL/FLORIS trajectory goldens."""
 
 from pathlib import Path
 
@@ -28,7 +14,17 @@ from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import solve_farm
 
+# Golden cases were captured once from WFCRL's central multi-agent env (FLORIS
+# 3.5 backend) by generate_wfcrl_env_goldens.py, which is no longer runnable
+# now that wfcrl is gone -- see its docstring. Each case stores the reset
+# wind/yaw, the seeded delta-action stream, per-step
+# observations/rewards/truncation, and the control config read live off that
+# env; this module replays the deltas through windrl_engine and asserts
+# parity, so it never imports wfcrl itself.
 RTOL = 1e-6
+# WFCRL rounds the integrated yaw through float32 at the env boundary while
+# windrl_engine stays float64, so env-level quantities agree to ~1e-6
+# relative, looser than the 1e-9 raw-solve tolerance.
 ATOL = 1e-5
 GOLDENS = Path(__file__).parent / "goldens"
 
@@ -75,7 +71,6 @@ def _drive_windrl(build_layout, speed, direction, deltas, ctrl):
 
 
 def _replay(case_id: str, build_layout, speed, direction):
-    """Replay a golden case through windrl_engine; return (golden, reset, steps)."""
     g = _load()
     deltas = list(g[f"{case_id}/deltas"])
     ctrl = {
@@ -181,7 +176,7 @@ def test_duty_cycle_limiter_fires_and_matches():
 
 
 def test_truncation_boundary_matches_wfcrl():
-    # WFCRL's reset burn-in advances _num_iter to 1, so an episode yields
+    # WFCRL's reset burn-in advances its step counter to 1, so an episode yields
     # max_num_steps - 1 agent steps before truncation. The boundary was measured
     # from the live reference (max_num_steps=6) and frozen into the golden.
     case_id = "truncation-boundary"

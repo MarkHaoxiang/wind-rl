@@ -1,19 +1,14 @@
-"""Turn the physics/farm modules' jaxtyping annotations into enforced runtime checks.
+"""Install jaxtyping/beartype runtime shape checks for the farm/physics single-farm core.
 
-The single-farm core (``farm/*`` and ``physics/*``) is annotated with
-un-batched shape aliases (``"turbines"``, ``"turbines grid grid"``, ...).
-Installing jaxtyping's import hook (backed by
-beartype) here makes those annotations *checked* during the test run -- every
-call, and every ``jax.jit`` trace, verifies shapes and dtypes -- at zero cost to
-the shipped package (the hook only exists in the test session).
+The un-batched shape aliases (``"turbines"``, ``"turbines grid grid"``, ...) on
+``farm/*`` and ``physics/*`` become *checked* for the test run -- every call and
+every ``jax.jit`` trace verifies shapes and dtypes -- at zero cost to the
+shipped package (the hook only exists in the test session). It must be
+installed before those modules are first imported, so this lives in the
+top-level conftest, which pytest loads before any test module.
 
-The hook must be installed before the target modules are first imported, so
-this lives in the top-level ``tests`` conftest, which pytest loads before any
-test module.
-
-``env`` / ``analysis`` are intentionally excluded: their per-turbine
-annotations are the same un-batched aliases but execute batched under
-``vmap`` (``BatchedWindFarmEnv``, rose evaluation), so enforcing them needs a
+``env`` / ``analysis`` are excluded: they execute the same un-batched aliases
+batched under ``vmap`` (``BatchedWindFarmEnv``, rose evaluation), which needs a
 separate batched -> single-farm re-annotation pass first.
 """
 

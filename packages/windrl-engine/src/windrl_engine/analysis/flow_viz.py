@@ -35,7 +35,6 @@ def _u_on_plane(
     y_query: QueryPlane,
     z_query: QueryPlane,
 ) -> QueryPlane:
-    """Streamwise velocity u at wind-aligned-frame query points (FLORIS full-flow pass)."""
     solution = solve_farm(layout, wind, yaw)
 
     x_rot, y_rot = rotate_to_wind_frame(layout.x, layout.y, wind.direction)

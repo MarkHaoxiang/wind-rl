@@ -115,8 +115,8 @@ def test_horizontal_slice_extent_matches_the_requested_bounds() -> None:
 
 def test_horizontal_slice_upstream_edge_is_freestream_at_hub_height() -> None:
     # At z=hub height, the shear profile u=ws*(z/HH)^0.12 collapses to ws
-    # exactly, and a point well upstream of every turbine sees no deficit
-    # (spec §5.3: the deficit masks are gated on x downstream of the rotor).
+    # exactly, and a point well upstream of every turbine sees no deficit (the
+    # deficit masks are gated on x downstream of the rotor).
     layout = row_layout(2)  # turbines at world x=0 and x=504
     wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
     bounds = (-252.0, 756.0, -50.0, 50.0)  # x=-252 is 2 diameters upstream of x=0

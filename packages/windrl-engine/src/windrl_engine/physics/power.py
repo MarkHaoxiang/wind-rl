@@ -14,7 +14,7 @@ def turbine_powers(
     *,
     turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> Float[Array, "turbines"]:
-    """Per-turbine electrical power (W) from the cubic-mean rotor velocity (spec §6a)."""
+    """Per-turbine electrical power (W) from the cubic-mean rotor velocity."""
     rotor_speed = jnp.cbrt(jnp.mean(u**3, axis=(1, 2)))
     u_eff = (AIR_DENSITY / turbine.ref_density) ** (1 / 3) * rotor_speed
     u_eff = u_eff * cosd(yaw) ** (turbine.pP / 3)
@@ -22,7 +22,7 @@ def turbine_powers(
 
 
 def load_proxies(solution: FlowSolution) -> Float[Array, "turbines 4"]:
-    """Per-turbine [TI, std(u), std(v), std(w)] over the rotor plane (spec §6b)."""
+    """Per-turbine [TI, std(u), std(v), std(w)] over the rotor plane."""
     return jnp.stack(
         [
             solution.turbulence_intensity,
@@ -37,7 +37,7 @@ def load_proxies(solution: FlowSolution) -> Float[Array, "turbines 4"]:
 def local_wind(
     solution: FlowSolution, wind: WindCondition
 ) -> tuple[Float[Array, "turbines"], Float[Array, "turbines"]]:
-    """Per-turbine local speed ∛(mean u³) and inflow direction (deg) (spec §6c)."""
+    """Per-turbine local speed ∛(mean u³) and inflow direction (deg)."""
     speed = jnp.cbrt(jnp.mean(solution.u**3, axis=(1, 2)))
     direction = jnp.mean(
         wind.direction - jnp.rad2deg(jnp.arctan2(solution.v, solution.u)), axis=(1, 2)

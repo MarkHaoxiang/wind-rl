@@ -40,7 +40,7 @@ POWER: TurbineTable = jnp.asarray([
 ])
 # fmt: on
 
-# power_interp lookup table: 0.5·rotor_area·Cp(ws)·gen_eff·ws³ (W), per spec §5.5.
+# power_interp lookup table: 0.5·rotor_area·Cp(ws)·gen_eff·ws³ (W).
 _INNER_POWER: TurbineTable = (
     0.5 * ROTOR_AREA * POWER * GENERATOR_EFFICIENCY * WIND_SPEED**3
 )

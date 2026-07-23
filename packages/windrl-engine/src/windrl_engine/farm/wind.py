@@ -19,7 +19,7 @@ class WindRose(NamedTuple):
 
 
 def sample_wind(key: Key[Array, ""]) -> WindCondition:
-    """Reset-time wind draw (spec §3): 8·Weibull(8) speed, Normal(270, 20) direction."""
+    """Reset-time wind draw: 8·Weibull(8) speed, Normal(270, 20) direction."""
     speed_key, direction_key = jax.random.split(key)
     u = jax.random.uniform(speed_key, ())
     speed = jnp.clip(8.0 * (-jnp.log(u)) ** (1.0 / 8.0), 0.0, 28.0)

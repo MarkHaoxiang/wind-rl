@@ -22,6 +22,17 @@ Binding for all code in `src/`, `tests/`, and `experiments/`.
 - Inline comments only where the code is surprising (workarounds, API churn,
   numerical subtleties) — and they state the reason, ideally with a reference.
 
+## Docstrings describe purpose, not history
+
+- A docstring states what the abstraction is *for*, at the level of the
+  abstraction itself — the role it plays for its caller, not how it is built.
+- Never cite design history: no decision numbers, plan/spec section references,
+  upstream-project comparisons, or "this replaces X". Git history is the
+  record; a docstring reader is a user, not a reviewer.
+- Implementation specifics (algorithms, masking tricks, reference-parity
+  subtleties) belong as inline comments next to the code they explain — and
+  only where that code is surprising — never in the docstring.
+
 ## Abstractions
 
 - Clear, small, single-purpose modules; one concept per file.

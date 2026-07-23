@@ -1,4 +1,4 @@
-"""farm/ is fully implemented; these run now."""
+"""farm/ unit tests: wind sampling, layout geometry, and Ct/Cp/power-table interpolants."""
 
 import math
 
@@ -81,7 +81,7 @@ def test_horns_rev2_has_91_turbines() -> None:
     assert layout.y.shape == (91,)
 
 
-# --- Ct/Cp/inner-power interpolants (spec §5.5) -----------------------------
+# --- Ct/Cp/inner-power interpolants -----------------------------------------
 
 
 def test_ct_interp_matches_table_at_a_nonzero_node() -> None:
@@ -100,7 +100,7 @@ def test_ct_interp_clips_zero_valued_table_nodes_to_1e_minus_4() -> None:
 
 
 def test_cp_interp_is_exact_zero_at_a_zero_valued_node() -> None:
-    # Unlike Ct, Cp has no post-clip (spec §5.5): fCp_interp fill is (0.0, 1.0)
+    # Unlike Ct, Cp has no post-clip: fCp_interp fill is (0.0, 1.0)
     # and the table's own zero nodes pass through unclipped.
     assert float(cp_interp_fn(WIND_SPEED[0])) == pytest.approx(0.0, abs=1e-12)
 
@@ -119,7 +119,7 @@ def test_cp_interp_linear_midpoint_between_8_0_and_8_5() -> None:
 
 def test_power_interp_linear_midpoint_interpolates_inner_power_table() -> None:
     # power_interp interpolates the precomputed inner-power table
-    # (0.5·rotor_area·Cp(ws)·gen_eff·ws³ per node, spec §5.5), NOT the physical
+    # (0.5·rotor_area·Cp(ws)·gen_eff·ws³ per node), NOT the physical
     # power recomputed at the midpoint wind speed -- so the expected value is
     # the average of the *table* endpoints, not 0.5·rotor_area·Cp(mid)·mid³.
     inner_power_13 = 0.5 * ROTOR_AREA * POWER[13] * WIND_SPEED[13] ** 3
