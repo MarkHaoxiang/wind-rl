@@ -11,10 +11,10 @@ or under pytest:
 
 import jax
 import jax.numpy as jnp
-
 from mava.networks import FeedForwardActor, FeedForwardValueNet
 from mava.networks.heads import ContinuousActionHead
 from mava.types import ObservationGlobalState
+
 from windrl_train.networks import GCNGlobalCritic, GCNTorso
 
 _NUM_AGENTS = 6
