@@ -95,11 +95,12 @@ class WindFarm(Environment):
         self._norm_positions = _normalize_positions(self.layout.x, self.layout.y)
         self.add_global_state = add_global_state
         self.num_agents = int(self.layout.x.shape[0])
-        self.time_limit = self._core_config.horizon
         self.action_dim = 1
-        self._yaw_step = self._core_config.yaw_step
-        self._load_coef = self._core_config.load_coef
         super().__init__()
+
+    @property
+    def time_limit(self) -> int:
+        return self._core_config.horizon
 
     def _observation(
         self, obs: Any, state: FarmState
@@ -133,13 +134,14 @@ class WindFarm(Environment):
         return state, timestep
 
     def step(self, state: FarmState, action: chex.Array) -> tuple[FarmState, TimeStep]:
-        delta_yaw = cast(jax.Array, action.reshape(self.num_agents) * self._yaw_step)
+        yaw_step = self._core_config.yaw_step
+        delta_yaw = cast(jax.Array, action.reshape(self.num_agents) * yaw_step)
         new_state, obs, reward, truncated = core_step(
             self.layout,
             state,
             delta_yaw,
-            yaw_step=self._yaw_step,
-            load_coef=self._load_coef,
+            yaw_step=yaw_step,
+            load_coef=self._core_config.load_coef,
             horizon=self.time_limit,
         )
         # A traced array stands in for the StepType enum, as in Mava's own wrappers.

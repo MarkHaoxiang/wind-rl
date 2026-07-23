@@ -274,13 +274,7 @@ class BatchedWindFarmEnv:
     def __init__(self, config: WindFarmEnvConfig) -> None:
         self.config = config
         self.layout = config.build_layout()
-        self.n_envs = config.n_envs
         self.n_turbines = int(self.layout.x.shape[0])
-        self.yaw_step = config.yaw_step
-        self.load_coef = config.load_coef
-        self.horizon = config.horizon
-        self.control_mode = config.control_mode
-        self.fidelity = config.fidelity
         self.turbine = config.build_turbine()
         self._reset_jit = jax.jit(
             _batched_reset, static_argnames=("fidelity", "per_env_layout")
@@ -296,11 +290,11 @@ class BatchedWindFarmEnv:
 
     def _step_kwargs(self) -> _StepStatics:
         return {
-            "yaw_step": self.yaw_step,
-            "load_coef": self.load_coef,
-            "horizon": self.horizon,
-            "control_mode": self.control_mode,
-            "fidelity": self.fidelity,
+            "yaw_step": self.config.yaw_step,
+            "load_coef": self.config.load_coef,
+            "horizon": self.config.horizon,
+            "control_mode": self.config.control_mode,
+            "fidelity": self.config.fidelity,
         }
 
     def reset(
@@ -316,14 +310,14 @@ class BatchedWindFarmEnv:
                 True,
             )
         key, self._key = jax.random.split(key)
-        keys = jax.random.split(key, self.n_envs)
+        keys = jax.random.split(key, self.config.n_envs)
         state, obs = cast(
             tuple[FarmState, Observation],
             self._reset_jit(
                 self._active_layout,
                 keys,
                 self.turbine,
-                fidelity=self.fidelity,
+                fidelity=self.config.fidelity,
                 per_env_layout=self._per_env_layout,
             ),
         )
@@ -331,10 +325,10 @@ class BatchedWindFarmEnv:
         return obs
 
     def _validate_layouts(self, layouts: FarmLayout) -> FarmLayout:
-        if layouts.x.shape != (self.n_envs, self.n_turbines):
+        if layouts.x.shape != (self.config.n_envs, self.n_turbines):
             raise ValueError(
                 "per-env layouts must have shape "
-                f"(n_envs={self.n_envs}, n_turbines={self.n_turbines}), got "
+                f"(n_envs={self.config.n_envs}, n_turbines={self.n_turbines}), got "
                 f"{tuple(layouts.x.shape)}"
             )
         return layouts
@@ -395,8 +389,8 @@ class BatchedWindFarmEnv:
         return rewards
 
     def action_space(self) -> Box | MultiDiscrete:
-        if self.control_mode == "continuous":
-            return Box((self.n_turbines,), -self.yaw_step, self.yaw_step)
+        if self.config.control_mode == "continuous":
+            return Box((self.n_turbines,), -self.config.yaw_step, self.config.yaw_step)
         return MultiDiscrete((3,) * self.n_turbines)
 
     def observation_space(self) -> dict[str, Box]:

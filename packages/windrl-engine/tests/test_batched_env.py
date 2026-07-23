@@ -67,9 +67,9 @@ def test_batched_step_matches_stacked_single_farm_step_calls() -> None:
             env.layout,
             lane_state,
             actions[i],
-            yaw_step=env.yaw_step,
-            load_coef=env.load_coef,
-            horizon=env.horizon,
+            yaw_step=env.config.yaw_step,
+            load_coef=env.config.load_coef,
+            horizon=env.config.horizon,
         )
         assert jnp.allclose(obs.yaw[i], expected_obs.yaw, atol=1e-9)
         assert jnp.allclose(obs.freewind[i], expected_obs.freewind, atol=1e-9)
@@ -234,9 +234,9 @@ def test_per_env_layouts_make_each_lane_solve_its_own_layout() -> None:
             _lane_layout(layouts, i),
             lane_state,
             actions[i],
-            yaw_step=env.yaw_step,
-            load_coef=env.load_coef,
-            horizon=env.horizon,
+            yaw_step=env.config.yaw_step,
+            load_coef=env.config.load_coef,
+            horizon=env.config.horizon,
         )
         assert jnp.allclose(reward[i], expected_reward)
 
