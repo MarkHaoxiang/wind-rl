@@ -59,6 +59,32 @@ Common Hydra overrides: `env.kwargs.layout` (`turb3_row1` | `ablaincourt` |
 `env.kwargs.load_coef`, `arch.num_envs`, `system.total_timesteps`. Logging is
 Mava's own console logger; enable others via `logger.loggers.<name>.enabled`.
 
+## Weights & Biases
+
+Mava ships console/neptune/tensorboard/json loggers but no wandb one, so
+`windrl_train.logging.WandbLogger` (a `mava.utils.logger.BaseLogger` subclass,
+same zero-edit injection style as `train._EvalRecordingLogger`) is registered in
+`configs/ff_mappo.yaml` under `logger.loggers.wandb`, disabled by default.
+Enable it and the eval-return-over-steps charts follow:
+
+```bash
+JAX_PLATFORMS=cpu packages/windrl-train/.venv/bin/python -m windrl_train.train \
+  env.kwargs.layout=turb3_row1 network=mlp system.num_updates=8000 \
+  logger.loggers.wandb.enabled=true logger.loggers.wandb.project=windrl-train
+```
+
+Mode and output directory mirror the same `WIND_RL_*` env-var contract used
+elsewhere in the repo (mirrored, **not** imported — this venv has no `wind_rl`):
+
+- `WIND_RL_WANDB_MODE` — `online` (default) | `offline` | `disabled`.
+- `WIND_RL_WDIR` — wandb run dir (default `~/.wind_rl`).
+
+The run `name` (default `mappo-mlp-<layout>`) deliberately omits the seed so
+seeds share a name and wandb group-by-name shows the seed distribution; the seed
+goes in `tags` (`seed_<n>`) instead. `wandb` is installed explicitly into the
+venv (`uv pip install "wandb>=0.16,<0.18"`) because this package installs
+`--no-deps`; the pin keeps protobuf at 3.20.3 for Mava's `tensorboard_logger`.
+
 ## Networks
 
 `network=mlp` (Mava's per-agent MLP) is the default. `network=gcn` selects the

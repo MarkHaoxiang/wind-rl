@@ -10,6 +10,12 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "windrl-engine",
+    # wandb backend for the logger. Pinned <0.18: Mava's `tensorboard_logger`
+    # ships pre-generated protobuf stubs that break on protobuf>=4, and newer
+    # wandb pulls protobuf 7. This range resolves to protobuf 3.20.3, which
+    # tensorboard_logger accepts. (Installed explicitly — this package is set up
+    # `--no-deps`; see README.)
+    "wandb>=0.16,<0.18",
     # Mava is deliberately NOT declared here: its distribution name is id-mava
     # (a PEP 508 "mava @ git+..." spec hard-fails), and a non-editable git wheel
     # drops mava/configs (no __init__.py), breaking Hydra's pkg://mava.configs.

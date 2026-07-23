@@ -9,6 +9,30 @@ defaults:
   - env: windfarm
   - _self_
 
+# Add a wandb backend to Mava's logger group (merged via `_self_`, so it extends
+# console/neptune/json/tensorboard rather than replacing them). Disabled by
+# default; enable with `logger.loggers.wandb.enabled=true`. Mode/output dir honor
+# WIND_RL_WANDB_MODE / WIND_RL_WDIR inside WandbLogger. The run `name` must not
+# encode the seed (seeds share a name for group-by-name); the seed lives in tags.
+logger:
+  loggers:
+    wandb:
+      _target_: windrl_train.logging.WandbLogger
+      enabled: false
+      project: windrl-train
+      # Scalar interpolations only: Mava's `_make_multi_logger` copies the logger
+      # node with `dict(...)`, which detaches nested containers from the config
+      # root, so an interpolated list element (e.g. tags) raises
+      # InterpolationKeyError at instantiate time. `seed` stays scalar and the
+      # seed tag is assembled inside WandbLogger.
+      name: mappo-mlp-${env.kwargs.layout}
+      entity: null
+      group: null
+      seed: ${system.seed}
+      tags:
+        - mlp
+        - mappo
+
 hydra:
   searchpath:
     - pkg://mava.configs
