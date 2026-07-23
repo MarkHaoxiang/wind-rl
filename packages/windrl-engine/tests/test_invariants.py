@@ -1,18 +1,18 @@
-"""physics/ invariant tests, CI-safe (no wfcrl)."""
+"""physics/ invariant tests (design doc "Testing strategy"), CI-safe (no wfcrl)."""
 
 import jax
 import jax.numpy as jnp
 
 from windrl_engine.env.env import reset, step
 from windrl_engine.farm.layout import FarmLayout, row_layout
-from windrl_engine.farm.turbine import HUB_HEIGHT, D
+from windrl_engine.farm.turbine import DEFAULT_TURBINE, HUB_HEIGHT
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import solve_farm
 
-# Rotor grid z-offsets, matching FLORIS's disc_grid = linspace(-31.5, 31.5, 3);
-# the grid is centered on hub height (not the tower base) -- z_grid = HH + disc.
-_GRID_Z = HUB_HEIGHT + jnp.asarray([-0.25 * D, 0.0, 0.25 * D])
+# Rotor grid z-offsets: disc_grid = linspace(-D/4, D/4, 3) for the solver's
+# turbine, centered on hub height (not tower base) -- z_grid = HH + disc.
+_GRID_Z = HUB_HEIGHT + jnp.asarray([-0.25, 0.0, 0.25]) * DEFAULT_TURBINE.rotor_diameter
 RATED_POWER_W = 5.1e6
 
 

@@ -1,17 +1,14 @@
-"""Generate per-turbine GCH goldens from the latest FLORIS release for oracle retargeting.
+"""Freeze the FLORIS 4.6.6 solver golden for the differential reference test.
 
-Run isolated so the pinned FLORIS 3.5 in the project venv is never touched:
+FLORIS 4.6.6 is the sole reference. This runs it once through its `"defaults"`
+configuration (GCH: sosfs / gauss velocity / gauss deflection / crespo_hernandez
+constant 0.5, secondary-steering + yaw-added-recovery + transverse velocities on,
+air density 1.225, TI 0.06, shear 0.12, veer 0, cosine-loss nrel_5MW) and writes
+`goldens/floris_v4.6.6.npz`, which `test_reference_solver.py` asserts against
+forever after. Run isolated so the project venv is never touched:
 
     uv run --isolated --no-project --with "floris==4.6.6" python \
         packages/windrl-engine/tests/generate_floris_goldens.py
-
-FLORIS v4's `"defaults"` configuration is byte-identical, in every wake parameter
-this project uses (sosfs / gauss velocity / gauss deflection / crespo_hernandez
-constant 0.5, secondary-steering + yaw-added-recovery + transverse velocities on,
-air density 1.225, TI 0.06, shear 0.12, veer 0), to the WFCRL GCH template that
-drives the FLORIS 3.5 differential oracle. Only the built-in `nrel_5MW` turbine
-library differs between the two releases, so any divergence these goldens expose
-is a turbine-model change, not a wake-physics change.
 """
 
 from pathlib import Path

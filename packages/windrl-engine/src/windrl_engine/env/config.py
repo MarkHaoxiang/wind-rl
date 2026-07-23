@@ -11,10 +11,10 @@ from windrl_engine.farm.layout import (
     horns_rev2,
     turb3_row1,
 )
-from windrl_engine.farm.turbine import TurbineSpec, nrel5mw_v3, nrel5mw_v4
+from windrl_engine.farm.turbine import TurbineSpec, nrel5mw_v4
 
 LayoutName = Literal["turb3_row1", "ablaincourt", "horns_rev2"]
-TurbineName = Literal["nrel5mw_v3", "nrel5mw_v4"]
+TurbineName = Literal["nrel5mw_v4"]
 
 _LAYOUT_BUILDERS: dict[LayoutName, Callable[[], FarmLayout]] = {
     "turb3_row1": turb3_row1,
@@ -23,7 +23,6 @@ _LAYOUT_BUILDERS: dict[LayoutName, Callable[[], FarmLayout]] = {
 }
 
 _TURBINE_BUILDERS: dict[TurbineName, Callable[[], TurbineSpec]] = {
-    "nrel5mw_v3": nrel5mw_v3,
     "nrel5mw_v4": nrel5mw_v4,
 }
 
@@ -43,7 +42,7 @@ class WindFarmEnvConfig(BaseModel):
     yaw_step: float = Field(default=5.0, gt=0.0)
     control_mode: ControlMode = "continuous"
     fidelity: Fidelity = "floris"
-    turbine: TurbineName = "nrel5mw_v3"
+    turbine: TurbineName = "nrel5mw_v4"
     horizon: int = Field(default=500, ge=1)
     load_coef: float = Field(default=0.1, ge=0.0)
     n_envs: int = Field(default=1, ge=1)
