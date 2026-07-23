@@ -9,16 +9,13 @@ exclude = ["packages/windrl-train"]
 torch = [
   { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
-torchvision = [
-  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
 wind-rl = { workspace = true }
 
-# torch/torchvision are pinned to the CUDA 13.0 wheels on linux/win (see the
-# sources above); `explicit = true` keeps this index off every other package's
-# resolution. wind-rl now depends on torch directly (it left the graph with the
-# torchrl RL stack but generative/utils still import it), which is what makes
-# this index declaration load-bearing rather than latent.
+# torch is pinned to the CUDA 13.0 wheels on linux/win (see the source above);
+# `explicit = true` keeps this index off every other package's resolution.
+# wind-rl now depends on torch directly (it left the graph with the torchrl RL
+# stack but generative/utils still import it), which is what makes this index
+# declaration load-bearing rather than latent.
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"

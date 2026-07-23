@@ -30,27 +30,18 @@ jobs:
       - name: Install dev tooling (ruff, mypy, pytest)
         run: uv sync --only-dev
 
-      # torchvision comes from the same CPU index so its compiled ops match this
-      # torch: timm (pulled below for the vendored mfm import) needs torchvision,
-      # and a PyPI torchvision would mismatch the pytorch-index torch build
-      # (`operator torchvision::nms does not exist` at import).
-      - name: Install CPU torch + torchvision
-        run: uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+      - name: Install CPU torch
+        run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       # torch stays: wind_rl.generative (SLSQP feasibility projection) and
       # wind_rl.utils import it directly now that the torchrl RL stack is gone.
-      # timm brings a CPU torchvision (resolved against the CPU torch above) for
-      # the vendored `mfm` flow-map core imported by the generative closure.
       - name: Install pure-Python runtime deps
         run: >-
           uv pip install
           "hydra-core>=1.3.4" "matplotlib>=3.10.8" "numpy>=2.4.4"
           "omegaconf>=2.3.1" "pydantic>=2"
-          "pydantic-settings>=2.14.2" "scipy>=1.14" "timm"
+          "pydantic-settings>=2.14.2" "scipy>=1.14"
           "tqdm>=4.69.0" "wandb[media]>=0.28.1"
-
-      - name: Install vendored mfm (editable, no deps)
-        run: uv pip install --no-deps -e packages/mfm
 
       - name: Install wind-rl (editable, no deps)
         run: uv pip install --no-deps -e packages/wind-rl

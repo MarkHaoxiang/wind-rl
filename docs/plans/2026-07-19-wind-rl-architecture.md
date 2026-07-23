@@ -111,8 +111,6 @@ packages/wind-rl/         Generative/co-design layer (torch, cu130 index) +
   design/geometry.py      #   layout geometry utilities.
   experiment/             #   settings (WIND_RL_* env vars), wandb harness,
                           #   sweep/table/verdict machinery, cli.
-packages/mfm/             Vendored flow-map core (currently orphaned —
-                          removal pending owner decision).
 ```
 
 ### Reference fidelity (replaces the wfcrl dependency)
