@@ -1,24 +1,15 @@
 """farm/ is fully implemented (design doc §"Package tree"); these run now."""
 
 import math
+from importlib.resources import files
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 from windrl_engine.farm.layout import horns_rev2, row_layout
-from windrl_engine.farm.turbine import (
-    POWER,
-    ROTOR_AREA,
-    THRUST,
-    WIND_SPEED,
-    D,
-    ct_interp,
-    power_interp,
-)
-from windrl_engine.farm.turbine import (
-    cp_interp as cp_interp_fn,
-)
+from windrl_engine.farm.turbine import D, ct_lookup, nrel5mw_v4, power_lookup
 from windrl_engine.farm.wind import sample_wind
 
 N_WIND_SAMPLES = 20_000
@@ -81,64 +72,61 @@ def test_horns_rev2_has_91_turbines() -> None:
     assert layout.y.shape == (91,)
 
 
-# --- Ct/Cp/inner-power interpolants (spec §5.5) -----------------------------
+# --- nrel_5MW v4 tables: package data <-> turbine.py consistency -------------
 
 
-def test_ct_interp_matches_table_at_a_nonzero_node() -> None:
-    # WIND_SPEED[20] = 11.5, THRUST[20] = 0.70701647 -- well inside the
-    # (0.0001, 0.9999) clip range, so the post-clip is a no-op here.
-    ws = WIND_SPEED[20]
-    expected = THRUST[20]
-    assert float(ct_interp(ws)) == pytest.approx(float(expected), abs=1e-9)
+def _shipped_npz() -> dict[str, np.ndarray]:
+    resource = files("windrl_engine.farm.data") / "nrel5mw_v4.npz"
+    with resource.open("rb") as fh, np.load(fh) as npz:
+        return {key: npz[key] for key in npz.files}
 
 
-def test_ct_interp_clips_zero_valued_table_nodes_to_1e_minus_4() -> None:
-    # THRUST[0] = THRUST[1] = 0.0 verbatim in the table, but ct_interp clips
-    # every result (including exact table nodes) to (0.0001, 0.9999).
-    assert float(ct_interp(WIND_SPEED[0])) == pytest.approx(0.0001, abs=1e-12)
-    assert float(ct_interp(WIND_SPEED[1])) == pytest.approx(0.0001, abs=1e-12)
+def test_shipped_npz_matches_turbine_spec() -> None:
+    # The committed artifact is generated from floris 4.6.6's yaml
+    # (tests/generate_turbine_data.py); guard it against silent drift from what
+    # turbine.py loads and exposes.
+    npz = _shipped_npz()
+    spec = nrel5mw_v4()
+
+    assert npz["wind_speed"].shape == (54,)
+    np.testing.assert_array_equal(np.asarray(spec.wind_speed_table), npz["wind_speed"])
+    np.testing.assert_array_equal(np.asarray(spec.thrust_table), npz["thrust"])
+    np.testing.assert_array_equal(np.asarray(spec.power_table), npz["power_kw"])
+
+    assert spec.rotor_diameter == pytest.approx(125.88)
+    assert spec.hub_height == pytest.approx(90.0)
+    assert spec.pP == pytest.approx(1.88)
+    assert spec.tsr == pytest.approx(8.0)
+    assert spec.ref_density == pytest.approx(1.225)
+    assert spec.generator_efficiency == pytest.approx(0.944)
 
 
-def test_cp_interp_is_exact_zero_at_a_zero_valued_node() -> None:
-    # Unlike Ct, Cp has no post-clip (spec §5.5): fCp_interp fill is (0.0, 1.0)
-    # and the table's own zero nodes pass through unclipped.
-    assert float(cp_interp_fn(WIND_SPEED[0])) == pytest.approx(0.0, abs=1e-12)
+def test_ct_lookup_matches_table_at_a_nonzero_node() -> None:
+    spec = nrel5mw_v4()
+    ws = spec.wind_speed_table[16]  # 8.0 m/s, C_t inside the (1e-4, 0.9999) clip
+    assert float(ct_lookup(spec, ws)) == pytest.approx(
+        float(spec.thrust_table[16]), abs=1e-9
+    )
 
 
-def test_ct_interp_linear_midpoint_between_8_0_and_8_5() -> None:
-    ws_mid = (WIND_SPEED[13] + WIND_SPEED[14]) / 2.0
-    expected = (THRUST[13] + THRUST[14]) / 2.0
-    assert float(ct_interp(ws_mid)) == pytest.approx(float(expected), abs=1e-9)
+def test_ct_lookup_clips_out_of_range_to_fill() -> None:
+    spec = nrel5mw_v4()
+    assert float(ct_lookup(spec, jnp.asarray(-10.0))) == pytest.approx(
+        0.0001, abs=1e-12
+    )
+    assert float(ct_lookup(spec, jnp.asarray(100.0))) == pytest.approx(
+        0.0001, abs=1e-12
+    )
 
 
-def test_cp_interp_linear_midpoint_between_8_0_and_8_5() -> None:
-    ws_mid = (WIND_SPEED[13] + WIND_SPEED[14]) / 2.0
-    expected = (POWER[13] + POWER[14]) / 2.0
-    assert float(cp_interp_fn(ws_mid)) == pytest.approx(float(expected), abs=1e-9)
+def test_power_lookup_scales_abs_kw_table_to_watts() -> None:
+    spec = nrel5mw_v4()
+    ws = spec.wind_speed_table[16]
+    expected = float(spec.power_table[16]) * spec.power_scale
+    assert float(power_lookup(spec, ws)) == pytest.approx(expected, rel=1e-9)
 
 
-def test_power_interp_linear_midpoint_interpolates_inner_power_table() -> None:
-    # power_interp interpolates the precomputed inner-power table
-    # (0.5·rotor_area·Cp(ws)·gen_eff·ws³ per node, spec §5.5), NOT the physical
-    # power recomputed at the midpoint wind speed -- so the expected value is
-    # the average of the *table* endpoints, not 0.5·rotor_area·Cp(mid)·mid³.
-    inner_power_13 = 0.5 * ROTOR_AREA * POWER[13] * WIND_SPEED[13] ** 3
-    inner_power_14 = 0.5 * ROTOR_AREA * POWER[14] * WIND_SPEED[14] ** 3
-    ws_mid = (WIND_SPEED[13] + WIND_SPEED[14]) / 2.0
-    expected = (inner_power_13 + inner_power_14) / 2.0
-    assert float(power_interp(ws_mid)) == pytest.approx(float(expected), rel=1e-9)
-
-
-def test_ct_interp_fill_below_and_above_table_range() -> None:
-    assert float(ct_interp(jnp.asarray(-10.0))) == pytest.approx(0.0001, abs=1e-12)
-    assert float(ct_interp(jnp.asarray(100.0))) == pytest.approx(0.9999, abs=1e-12)
-
-
-def test_cp_interp_fill_below_and_above_table_range() -> None:
-    assert float(cp_interp_fn(jnp.asarray(-10.0))) == pytest.approx(0.0, abs=1e-12)
-    assert float(cp_interp_fn(jnp.asarray(100.0))) == pytest.approx(1.0, abs=1e-12)
-
-
-def test_power_interp_fill_below_and_above_table_range_is_zero() -> None:
-    assert float(power_interp(jnp.asarray(-10.0))) == pytest.approx(0.0, abs=1e-9)
-    assert float(power_interp(jnp.asarray(100.0))) == pytest.approx(0.0, abs=1e-9)
+def test_power_lookup_fill_out_of_range_is_zero() -> None:
+    spec = nrel5mw_v4()
+    assert float(power_lookup(spec, jnp.asarray(-10.0))) == pytest.approx(0.0, abs=1e-9)
+    assert float(power_lookup(spec, jnp.asarray(100.0))) == pytest.approx(0.0, abs=1e-9)
