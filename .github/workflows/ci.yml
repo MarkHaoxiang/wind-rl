@@ -79,10 +79,9 @@ jobs:
             fi;
           done
 
-      # The FLORIS reference tests (packages/windrl-engine/tests) now assert
-      # against committed goldens (goldens/floris_v3.5.npz + the frozen WFCRL
-      # env trajectories), so nothing imports wfcrl/FLORIS at test time and the
-      # whole suite runs on CI unfiltered.
+      # The FLORIS reference test (packages/windrl-engine/tests) asserts against
+      # a committed golden (goldens/floris_v4.6.6.npz), so nothing imports FLORIS
+      # at test time and the whole suite runs on CI unfiltered.
       - name: Pytest
         run: uv run --no-sync pytest -q
 

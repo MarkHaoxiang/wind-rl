@@ -56,9 +56,11 @@ packages/windrl-engine/
   src/windrl_engine/
     py.typed
     farm/
-      turbine.py       # NREL-5MW constants + the three 50-pt tables (verbatim
-                       #   from nrel_5MW.yaml) + Ct/Cp/inner-power interpolants
-                       #   with exact fill/clip semantics (spec §5.5)
+      turbine.py       # TurbineSpec PyTree + nrel5mw_v4() (FLORIS 4.6.6, the
+                       #   default); the 54-pt tables load at import from
+                       #   farm/data/nrel5mw_v4.npz (generated package data) and
+                       #   Ct/power lookups apply exact fill/clip semantics
+      data/            # committed nrel5mw_v4.npz (tests/generate_turbine_data.py)
       layout.py        # FarmLayout NamedTuple (x, y); builders: procedural
                        #   row/grid layouts + reference layouts (Turb3 row,
                        #   Ablaincourt 7T, HornsRev2 91T — values from wfcrl
@@ -149,12 +151,11 @@ class TurbineSpec(NamedTuple):
     wind_speed_table: TurbineTable; thrust_table: TurbineTable
     power_table: TurbineTable; power_scale: float          # power(u) = interp(u)·power_scale
     ct_fill_low: float; ct_fill_high: float
-def nrel5mw_v3() -> TurbineSpec                             # FLORIS 3.5 (default)
-def nrel5mw_v4() -> TurbineSpec                             # FLORIS 4.6.6 (cosine-loss, abs-kW)
+def nrel5mw_v4() -> TurbineSpec                             # FLORIS 4.6.6 (cosine-loss, abs-kW); the default
 
 def solve_farm(
     layout: FarmLayout, wind: WindCondition, yaw: Float[Array, "turbines"],
-    *, fidelity: str = "floris", turbine: TurbineSpec = nrel5mw_v3(),
+    *, fidelity: str = "floris", turbine: TurbineSpec = nrel5mw_v4(),
 ) -> FlowSolution
     # fidelity is a STATIC argname (two jit specializations): "corrected" drops the
     # rotor-plane ULP self-interaction and the stale-TI deflection ordering.
@@ -162,7 +163,7 @@ def solve_farm(
 # physics/power.py
 def turbine_powers(
     u: Float[Array, "turbines grid grid"], yaw: Float[Array, "turbines"],
-    *, turbine: TurbineSpec = nrel5mw_v3(),
+    *, turbine: TurbineSpec = nrel5mw_v4(),
 ) -> Float[Array, "turbines"]                  # Watts
 def load_proxies(solution: FlowSolution) -> Float[Array, "turbines 4"]
 def local_wind(
@@ -182,16 +183,16 @@ def reset(
 ) -> tuple[FarmState, Observation]
 def reset(
     layout: FarmLayout, key: Key[Array, ""], wind: WindCondition | None = None,
-    *, fidelity: str = "floris", turbine: TurbineSpec = nrel5mw_v3(),
+    *, fidelity: str = "floris", turbine: TurbineSpec = nrel5mw_v4(),
 ) -> tuple[FarmState, Observation]
 def step(
     layout: FarmLayout, state: FarmState, action: Float[Array, "turbines"],
     *, yaw_step: float, load_coef: float, horizon: int,
-    fidelity: str = "floris", turbine: TurbineSpec = nrel5mw_v3(),
+    fidelity: str = "floris", turbine: TurbineSpec = nrel5mw_v4(),
 ) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]
     # (state', obs, reward, truncated). fidelity static; turbine a runtime PyTree arg.
     # WindFarmEnvConfig exposes both as fidelity: {"floris","corrected"} and
-    # turbine: {"nrel5mw_v3","nrel5mw_v4"}.
+    # turbine: {"nrel5mw_v4"}.
 ```
 
 `BatchedWindFarmEnv` wraps these with `jit(vmap(...))` over a leading `envs`

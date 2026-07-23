@@ -90,8 +90,8 @@ packages/windrl-engine/   JAX wind-farm simulator — the environment.
                           full GCH physics, FLORIS-faithful to machine
                           precision via committed goldens; batched envs ×
                           wind conditions; fidelity flag ("floris" |
-                          "corrected") and selectable turbine library
-                          (nrel5mw_v3 / v4). Source of truth:
+                          "corrected") and turbine library
+                          (nrel5mw_v4). Source of truth:
                           docs/plans/2026-07-22-windrl-engine-design.md and
                           docs/plans/2026-07-22-jax-windfarm-step-spec.md.
 packages/windrl-train/    MARL training on the engine via Mava MAPPO
@@ -115,13 +115,15 @@ packages/wind-rl/         Generative/co-design layer (torch, cu130 index) +
 
 ### Reference fidelity (replaces the wfcrl dependency)
 
-`packages/windrl-engine/tests/goldens/` freezes the reference:
-`floris_v3.5.npz` (solver fields, verified 1e-12 against the live stack
-before wfcrl removal), `wfcrl_env_trajectories.npz` (env behavior incl.
-duty-cycle firing and the truncation boundary), `floris_v4.6.6.npz`
-(latest-FLORIS turbine library). Reference tests assert against goldens, run
-unfiltered on CI, and need no wfcrl/floris install; regeneration scripts run
-FLORIS in isolated envs (`uv run --isolated --with floris==…`).
+`packages/windrl-engine/tests/goldens/floris_v4.6.6.npz` is the sole
+reference: solver fields (u/v/w/TI/powers) captured once from FLORIS 4.6.6's
+`"defaults"` GCH configuration. The solver reference test asserts against it,
+env semantics (invariants, duty-cycle, truncation) are covered by golden-free
+tests, and the suite runs unfiltered on CI with no wfcrl/floris install. Two
+isolated regeneration scripts run FLORIS 4.6.6 (`uv run --isolated --with
+floris==4.6.6`): `generate_floris_goldens.py` (the solver golden) and
+`generate_turbine_data.py` (the shipped `nrel5mw_v4.npz` turbine tables,
+extracted from FLORIS's packaged `nrel_5MW.yaml`).
 
 ### Key interfaces
 
