@@ -1,44 +1,18 @@
 [project]
 name = "windrl-train"
 version = "0.1.0"
-description = "Mava MAPPO training on the windrl-engine JAX wind farm"
+description = "Experiment harness for windrl-engine (config/settings/verdict/wandb logging); the RL trainer is rewritten in-repo here."
 authors = [
     { name = "MarkHaoxiang", email = "mark.haoxiang@gmail.com" }
 ]
-# Mava pins jax==0.5.3 and python >=3.10,<3.13; the whole repo now shares this
-# py3.12 venv (see README). Mava itself is installed editable from a clone at the
-# pinned SHA, not declared here (id-mava naming + configs-drop, see README/CI).
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12"
 dependencies = [
     "windrl-engine",
-    # Match Mava's hard pins so the shared lock is deterministic; engine's
-    # jax>=0.5.3 co-resolves.
-    "jax==0.5.3",
-    "numpy==1.26.4",
-    "hydra-core>=1.3.4",
     "omegaconf>=2.3.1",
     "pydantic>=2",
     "pydantic-settings>=2",
-    # Mava imports `tensorboard_logger` unconditionally (mava/utils/logger.py),
-    # whose bundled pb2 stubs raise `Descriptors cannot be created directly` on
-    # protobuf>=4 -- so the whole trainer needs protobuf<4 to import at all,
-    # regardless of whether the tensorboard logger is enabled. That caps wandb at
-    # the 0.19 line: 0.19.x runs against protobuf 3.20, but wandb>=0.20 ships pb2
-    # stubs that require protobuf>=5 at runtime and fail to import under 3.20.
-    "protobuf>=3.20,<4",
-    "wandb>=0.19,<0.20",
+    "wandb>=0.20",
 ]
-
-[project.optional-dependencies]
-# GPU (NVIDIA CUDA 12) support. Opt-in only — never a hard dependency, so CI
-# (CPU-only, installs this package `--no-deps`) never pulls the multi-GB CUDA
-# wheels. The jax version MUST match Mava's pin (jax==0.5.3); this extra just
-# adds the `cuda12` plugin (jax-cuda12-plugin / -pjrt + nvidia-* wheels) on top
-# of the CPU jaxlib Mava already installs. Install order matters — see the
-# README "GPU" section: Mava first (it re-pins jax), then this extra LAST, or the
-# plugin gets clobbered. The bundled wheels are CUDA 12.9, which covers Blackwell
-# (sm_120, e.g. RTX 5090) via a recent driver's forward-compatible PTX JIT.
-gpu = ["jax[cuda12]==0.5.3"]
 
 [build-system]
 requires = ["hatchling"]

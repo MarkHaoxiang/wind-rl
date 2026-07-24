@@ -58,33 +58,20 @@ init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
 
-# Third-party packages that ship little or no typing. Mava and jumanji live in
-# the shared venv now; they have no py.typed, so imports from them are untyped.
+# Third-party packages that ship no py.typed, so imports from them are untyped.
+# floris is a real runtime dependency of windrl-engine; wandb still ships no
+# typing.
 [[tool.mypy.overrides]]
-# floris exists only inside the isolated golden/turbine-data generator runs
-# (`uv run --isolated --with floris==...`), never in this venv.
-module = ["wandb.*", "hydra.*", "mava.*", "jumanji.*", "floris.*"]
+module = ["wandb.*", "floris.*"]
 ignore_missing_imports = true
 
-# The Mava/jumanji-touching trainer modules wrap an untyped framework: strict
-# `disallow_any`/subclassing-Any/explicit-override checks there flag the
-# framework's own type gaps, not our bugs. The experiment surface
-# (config/settings/verdict) stays fully strict.
+# The wandb logger wraps an untyped client: strict `disallow_any`/untyped-call
+# checks there flag wandb's own type gaps, not our bugs.
 [[tool.mypy.overrides]]
-module = [
-    "windrl_train.env",
-    "windrl_train.networks",
-    "windrl_train.train",
-    "windrl_train.logging",
-]
+module = ["windrl_train.logging"]
 disallow_any_explicit = false
 disallow_untyped_calls = false
-disallow_any_generics = false
-disallow_subclassing_any = false
-warn_return_any = false
 warn_unreachable = false
-warn_unused_ignores = false
-disable_error_code = ["explicit-override"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages/windrl-engine/tests", "packages/windrl-train/tests"]
