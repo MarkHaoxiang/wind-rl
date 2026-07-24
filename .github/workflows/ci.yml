@@ -22,76 +22,34 @@ jobs:
       - name: Install Python 3.12
         run: uv python install 3.12
 
-      # One venv for the whole repo. `uv sync` installs both workspace members
-      # (windrl-engine + windrl-train) and their declared closures; Mava is
-      # installed separately below.
+      # One venv for the whole repo: installs both workspace members
+      # (windrl-engine + windrl-train) and their declared closures. The `gpu`
+      # extra is opt-in and left out here so CI never pulls the CUDA wheels.
       - name: Sync workspace
         run: uv sync
 
-      # Mava is GitHub-only (never released to PyPI as the JAX system) and pins
-      # jax==0.5.3 / numpy==1.26.4 / python<3.13. It is NOT declared in any
-      # pyproject: its distribution name is `id-mava` (a PEP 508 `mava @ git+...`
-      # spec hard-fails on the name mismatch), and a non-editable git wheel drops
-      # `mava/configs/` (no `__init__.py`, so `setuptools.packages.find` skips it
-      # and there's no package-data include), which breaks Hydra's
-      # `pkg://mava.configs` searchpath. The fix that works, matching Mava's own
-      # clone-and-dev-install workflow: clone the pinned SHA and `uv pip install
-      # -e` (editable keeps `mava.__path__` on the checkout so configs are found
-      # on disk). This clone also installs Mava's ~150-package closure into the
-      # synced venv (jax/jaxlib, flax, jumanji, jaxmarl, ...).
-      - name: Clone Mava (pinned SHA)
-        run: |
-          git clone --quiet https://github.com/instadeepai/Mava.git "$RUNNER_TEMP/mava-src"
-          git -C "$RUNNER_TEMP/mava-src" checkout --quiet e1cc61dd0d3a5e02cab126cfb46ddcb7c32a5fdf
-
-      - name: Install Mava (editable, pinned SHA)
-        run: uv pip install -e "$RUNNER_TEMP/mava-src"
-
-      # `--no-sync` on every `uv run` below: a plain `uv sync` would prune Mava's
-      # closure (it isn't a declared dependency), and reconciling Mava's own
-      # scipy/jax pins against the lock churns the env. The clone step above is
-      # the only thing the uv cache doesn't cover.
       - name: Ruff check
-        run: uv run --no-sync ruff check packages/windrl-engine/src packages/windrl-engine/tests packages/windrl-train/src experiments
+        run: uv run ruff check packages/windrl-engine/src packages/windrl-engine/tests packages/windrl-train/src experiments
 
       - name: Ruff format check
-        run: uv run --no-sync ruff format --check packages/windrl-engine/src packages/windrl-engine/tests packages/windrl-train/src experiments
+        run: uv run ruff format --check packages/windrl-engine/src packages/windrl-engine/tests packages/windrl-train/src experiments
 
       - name: Mypy (engine + train src)
-        run: uv run --no-sync mypy packages/windrl-engine/src packages/windrl-train/src
+        run: uv run mypy packages/windrl-engine/src packages/windrl-train/src
 
-      # Experiments are standalone Hydra scripts in digit-prefixed dirs (run.py
+      # Experiments are standalone scripts in digit-prefixed dirs (run.py
       # collides as a duplicate module across dirs), so each dir is checked on
-      # its own. Dirs with no .py files (e.g. a framework kept only for its
+      # its own. Dirs with no .py files (a framework kept only for its
       # report.md) are skipped -- mypy errors on an empty target.
       - name: Mypy (experiments, per directory)
         run: >-
           for d in experiments/*/; do
             if find "$d" -name '*.py' -print -quit | grep -q .; then
-              uv run --no-sync mypy "$d" || exit 1;
+              uv run mypy "$d" || exit 1;
             fi;
           done
 
       # The FLORIS reference tests assert against committed goldens, so nothing
-      # imports wfcrl/FLORIS at test time and the whole suite runs unfiltered.
-      # test_equivariance imports Mava, so it runs here too.
+      # imports floris at test time and the whole suite runs unfiltered.
       - name: Pytest
-        run: JAX_PLATFORMS=cpu uv run --no-sync pytest -q
-
-      - name: Import smoke
-        timeout-minutes: 3
-        run: >-
-          JAX_PLATFORMS=cpu uv run --no-sync python -c
-          "import windrl_train, windrl_train.env, windrl_train.train"
-
-      # Smallest override set that still exercises one full PPO update + one eval
-      # pass: 2 envs x 32-step rollout = 64 steps/update, 2 updates (Mava asserts
-      # num_updates > num_evaluation), 1 eval episode, absolute_metric off.
-      - name: Micro MAPPO training run (turb3_row1)
-        timeout-minutes: 5
-        run: >-
-          JAX_PLATFORMS=cpu uv run --no-sync python -m windrl_train.train
-          env.kwargs.layout=turb3_row1 env.kwargs.horizon=50
-          arch.num_envs=2 system.update_batch_size=1 system.rollout_length=32
-          system.num_updates=2 system.num_minibatches=1
-          arch.num_evaluation=1 arch.num_eval_episodes=1 arch.absolute_metric=False
+        run: JAX_PLATFORMS=cpu uv run pytest -q

@@ -17,13 +17,15 @@ Coding style is governed by [docs/coding-guidelines.md](docs/coding-guidelines.m
 clear abstractions, strict typing IS the documentation, comments minimal and
 only on user-facing API or genuine *why*.
 
-- **uv workspace**, Python 3.12 (Mava pins jax==0.5.3 / py<3.13, and the whole
-  repo now shares one venv). The root `pyproject.toml` is a virtual workspace
-  coordinator (tooling + dependency groups only, no `[project]` table).
-  `packages/windrl-engine` is the JAX wind-farm simulator (a WFCRL/FLORIS GCH
-  reimplementation, checked against committed FLORIS goldens); `packages/windrl-train`
-  is the Mava MAPPO trainer plus the experiment harness (`config`/`settings`/`verdict`).
-  WFCRL itself is no longer a dependency.
+- **uv workspace**, Python 3.12, one venv for the whole repo. The root
+  `pyproject.toml` is a virtual workspace coordinator (tooling + dependency
+  groups only, no `[project]` table). `packages/windrl-engine` is the JAX
+  wind-farm simulator (a WFCRL/FLORIS GCH reimplementation, checked against
+  committed FLORIS goldens); `packages/windrl-train` is the experiment harness
+  (`config`/`settings`/`verdict`/wandb logging) — the RL trainer is being
+  rewritten in-repo. WFCRL itself is no longer a dependency. A read-only Mava
+  clone at `/home/markhaoxiang/Projects/mava` is kept purely as a reading
+  reference for that rewrite.
 - All config objects are pydantic v2 (`extra="forbid"`) via the `Config` base
   in `packages/windrl-train/src/windrl_train/config.py` — a typo'd field is a
   `ValidationError`, not a silent no-op.
@@ -33,32 +35,21 @@ only on user-facing API or genuine *why*.
 
 ## Environment
 
-One venv for the whole repo (py3.12). Mava is GitHub-only, its distribution is
-named `id-mava`, and a non-editable wheel drops `mava/configs/`, so a PEP 508
-git dependency can't work — it is installed **editable from a clone** at the
-pinned SHA *after* `uv sync`, not declared in any `pyproject.toml`. Because it
-isn't declared, a plain `uv sync` **prunes Mava's whole closure** (~150
-packages). Setup and re-sync recipe (details in `packages/windrl-train/README.md`):
+One venv for the whole repo (py3.12), fully declared in the two package
+`pyproject.toml`s — a plain `uv sync` builds it, and `uv.lock` is committed:
 
 ```bash
-uv sync                              # first-time env
-git clone https://github.com/instadeepai/Mava.git /tmp/mava && \
-  git -C /tmp/mava checkout e1cc61dd0d3a5e02cab126cfb46ddcb7c32a5fdf
-uv pip install -e /tmp/mava          # installs Mava + closure into .venv
-# Later dependency changes: `uv sync --inexact` (preserves Mava). A plain
-# `uv sync` prunes it — re-run the `uv pip install -e /tmp/mava` line if so.
+uv sync                # first-time env (CPU)
+uv sync --extra gpu    # add the NVIDIA CUDA 12 jax plugin (opt-in, see engine README)
 ```
 
 ## Checks
 
-Run all four with `--no-sync` so the frozen Mava install (its own scipy/jax
-pins) is never reconciled away:
-
 ```bash
-uv run --no-sync ruff check packages/windrl-engine/src packages/windrl-engine/tests packages/windrl-train/src experiments
-uv run --no-sync ruff format --check packages/windrl-engine/src packages/windrl-engine/tests packages/windrl-train/src experiments
-uv run --no-sync mypy packages/windrl-engine/src packages/windrl-train/src   # + each experiments/*/ dir with .py files
-uv run --no-sync pytest -q
+uv run ruff check packages/windrl-engine/src packages/windrl-engine/tests packages/windrl-train/src experiments
+uv run ruff format --check packages/windrl-engine/src packages/windrl-engine/tests packages/windrl-train/src experiments
+uv run mypy packages/windrl-engine/src packages/windrl-train/src   # + each experiments/*/ dir with .py files
+uv run pytest -q
 ```
 
 `uv run pre-commit install` wires the first three (plus a fast pytest) into
@@ -68,18 +59,8 @@ a pre-commit hook; CI (`.github/workflows/ci.yml`) runs the same gate.
 
 The repo is torch-free (the DiCoDe `generative`/`design` torch code was
 deleted with the old `wind-rl` package). CI (`.github/workflows/ci.yml`) is a
-single job mirroring local setup: `uv sync` (py3.12), then clone + editable
-`uv pip install -e` Mava at the pinned SHA, then ruff/format/mypy/pytest and
-the import smoke + micro MAPPO run. The Mava install cannot be a PEP 508 git
-dependency (its distribution is `id-mava`, and a non-editable wheel drops
-`mava/configs/`, breaking Hydra's `pkg://mava.configs`), so it is always an
-editable-from-clone step — keep that comment in the workflow.
-
-The wandb pin is `>=0.19,<0.20` with an explicit `protobuf>=3.20,<4`
-(`packages/windrl-train/pyproject.toml`): Mava imports `tensorboard_logger`
-unconditionally, whose bundled pb2 stubs break on protobuf>=4, so the trainer
-needs protobuf<4 to import at all; wandb>=0.20 ships pb2 stubs that require
-protobuf>=5 at runtime, so 0.19 is the newest that co-resolves.
+single job mirroring local setup: `uv sync` (py3.12), then
+ruff/format/mypy/pytest.
 
 The FLORIS reference test (`packages/windrl-engine/tests/test_reference_solver.py`)
 asserts against a single committed golden (`goldens/floris_v4.6.6.npz`), so no
