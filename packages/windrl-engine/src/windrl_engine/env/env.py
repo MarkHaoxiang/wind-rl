@@ -19,6 +19,11 @@ from windrl_engine.physics.solver import solve_farm
 WIND_SPEED_MAX: Final = 28.0  # m/s, matches WFCRL's default wind-speed bound
 WIND_DIRECTION_MAX: Final = 360.0  # deg, matches WFCRL's default wind-direction bound
 
+#: A ``FarmLayout`` pytree whose every leaf carries a leading ``(envs,)`` axis.
+#: vmap consumes and produces the single-farm class, so the batched form cannot
+#: be a distinct runtime type; this alias marks the seams that expect it.
+PerEnvLayouts = FarmLayout
+
 
 class Observation(NamedTuple):
     yaw: Float[Array, "turbines"]
@@ -318,7 +323,7 @@ class BatchedWindFarmEnv:
         }
 
     def reset(
-        self, key: Key[Array, ""], layouts: FarmLayout | None = None
+        self, key: Key[Array, ""], layouts: PerEnvLayouts | None = None
     ) -> Observation:
         """Reset every lane; ``layouts`` (leading ``(envs,)`` axis) gives each lane
         its own layout, else the shared config layout is used for all lanes."""
@@ -344,13 +349,15 @@ class BatchedWindFarmEnv:
         self._state, self._obs = state, obs
         return obs
 
-    def _validate_layouts(self, layouts: FarmLayout) -> FarmLayout:
-        if layouts.x.shape != (self.config.n_envs, self.n_turbines):
-            raise ValueError(
-                "per-env layouts must have shape "
-                f"(n_envs={self.config.n_envs}, n_turbines={self.n_turbines}), got "
-                f"{tuple(layouts.x.shape)}"
-            )
+    def _validate_layouts(self, layouts: PerEnvLayouts) -> PerEnvLayouts:
+        expected = (self.config.n_envs, self.n_turbines)
+        for field_name, leaf in zip(FarmLayout._fields, layouts, strict=True):
+            if leaf.shape != expected:
+                raise ValueError(
+                    f"per-env layouts: {field_name} must have shape "
+                    f"(n_envs={expected[0]}, n_turbines={expected[1]}), got "
+                    f"{tuple(leaf.shape)}"
+                )
         return layouts
 
     def step(

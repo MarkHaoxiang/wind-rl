@@ -318,3 +318,17 @@ def test_per_env_layout_with_wrong_turbine_count_raises_eagerly() -> None:
     )
     with pytest.raises(ValueError):
         env.reset(jax.random.key(0), three_turbines)
+
+
+def test_per_env_layout_with_one_malformed_leaf_raises_eagerly() -> None:
+    # A batched x but unbatched y (easy to produce with a bad tree_map) must be
+    # rejected on every leaf, not just x — otherwise it fails opaquely inside
+    # the jitted vmap or broadcasts.
+    config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=2, horizon=50)
+    env = BatchedWindFarmEnv(config)
+    batched_x_only = FarmLayout(
+        x=jnp.asarray([[0.0, 504.0], [0.0, 504.0]]),
+        y=jnp.zeros(2),
+    )
+    with pytest.raises(ValueError, match="y must have shape"):
+        env.reset(jax.random.key(0), batched_x_only)
