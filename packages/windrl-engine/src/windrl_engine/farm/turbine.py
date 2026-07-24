@@ -3,7 +3,7 @@ from typing import Final, NamedTuple
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from windrl_engine.farm.data import load_nrel5mw_v4
+from windrl_engine.farm.floris_tables import load_nrel5mw_v4
 
 D: Final = 126.0  # nominal NREL-5MW rotor diameter for synthetic row-layout spacing
 HUB_HEIGHT: Final = 90.0  # nominal NREL-5MW hub height for synthetic query grids

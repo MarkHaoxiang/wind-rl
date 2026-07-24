@@ -20,8 +20,8 @@ only on user-facing API or genuine *why*.
 - **uv workspace**, Python 3.12, one venv for the whole repo. The root
   `pyproject.toml` is a virtual workspace coordinator (tooling + dependency
   groups only, no `[project]` table). `packages/windrl-engine` is the JAX
-  wind-farm simulator (a WFCRL/FLORIS GCH reimplementation, checked against
-  committed FLORIS goldens); `packages/windrl-train` is the experiment harness
+  wind-farm simulator (a WFCRL/FLORIS GCH reimplementation, checked live against
+  FLORIS 4.6.6); `packages/windrl-train` is the experiment harness
   (`config`/`settings`/`verdict`/wandb logging) — the RL trainer is being
   rewritten in-repo. WFCRL itself is no longer a dependency. A read-only Mava
   clone at `/home/markhaoxiang/Projects/mava` is kept purely as a reading
@@ -62,15 +62,16 @@ deleted with the old `wind-rl` package). CI (`.github/workflows/ci.yml`) is a
 single job mirroring local setup: `uv sync` (py3.12), then
 ruff/format/mypy/pytest.
 
-The FLORIS reference test (`packages/windrl-engine/tests/test_reference_solver.py`)
-asserts against a single committed golden (`goldens/floris_v4.6.6.npz`), so no
-test imports FLORIS and the whole suite runs on CI unfiltered — there is no `sim`
-marker. FLORIS 4.6.6 is the sole reference: `generate_floris_goldens.py`
-(isolated, `--with floris==4.6.6`) regenerates the solver golden, and
-`generate_turbine_data.py` (same isolation) regenerates the shipped turbine
-tables (`src/windrl_engine/farm/data/nrel5mw_v4.npz`) from FLORIS's packaged
-`nrel_5MW.yaml`. Env semantics (invariants, duty-cycle, truncation) are checked
-by golden-free tests (`test_invariants.py`, `test_env_pipeline.py`).
+FLORIS 4.6.6 is a pinned runtime dependency of windrl-engine, so the reference
+is computed live in-process — there are no committed goldens and no isolated
+generator scripts. The turbine tables are read from FLORIS's packaged
+`nrel_5MW.yaml` at import (`farm/floris_tables.py`, kept out of the beartype
+import hook), and `test_reference_solver.py` runs FLORIS through its `"defaults"`
+GCH config once per session (module fixture, CPU) and asserts the JAX solve
+against it at rtol 1e-9. `test_farm.py` asserts `turbine.py` matches that same
+packaged YAML, so upstream drift is caught without a frozen file. Env semantics
+(invariants, duty-cycle, truncation) are checked by golden-free tests
+(`test_invariants.py`, `test_env_pipeline.py`).
 
 **If torch is reintroduced (e.g. for the `generative`/`design` rewrite), never
 add `torch_scatter` or `torch_cluster`.** DiCoDe's manual

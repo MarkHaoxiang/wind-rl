@@ -1,21 +1,19 @@
-"""Differential agreement of windrl_engine's wake solve against a frozen FLORIS golden.
+"""Differential agreement of windrl_engine's wake solve against a live FLORIS reference.
 
 The reference is FLORIS 4.6.6 driven through its ``"defaults"`` configuration
 (GCH: secondary steering / yaw-added recovery / transverse velocities on, crespo
-constant 0.5, cosine-loss nrel_5MW), captured once into ``goldens/floris_v4.6.6.npz``
-by ``generate_floris_goldens.py``. FLORIS itself is not a dependency, so this test
-is CI-safe: it loads the golden arrays (u/v/w/TI/powers per case) rather than
-building any FLORIS object. Both stacks run float64; the spec targets <1e-10
-relative, so 1e-9 leaves one order of margin.
+constant 0.5, cosine-loss nrel_5MW), computed in-process once per session. Both
+stacks run float64; the spec targets <1e-10 relative, so 1e-9 leaves one order
+of margin.
 """
 
 from collections.abc import Callable
-from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
 import pytest
+from floris import FlorisModel
 
 from windrl_engine.farm.layout import FarmLayout, ablaincourt, turb3_row1
 from windrl_engine.farm.turbine import nrel5mw_v4
@@ -24,20 +22,45 @@ from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import solve_farm
 
 RTOL = 1e-9
-GOLDENS = Path(__file__).parent / "goldens"
+AMBIENT_TI = 0.06
 
-
-def _load(name: str) -> dict[str, npt.NDArray[np.float64]]:
-    with np.load(GOLDENS / name, allow_pickle=True) as data:
-        return {key: data[key] for key in data.files}
-
-
-# (golden case id, layout builder, wind direction, wind speed, yaw)
-CASES = [
+# (case id, layout builder, wind direction [deg, 270 = from the west], speed, yaw)
+CASES: list[tuple[str, Callable[[], FarmLayout], float, float, list[float]]] = [
     ("row3_270_8_flat", turb3_row1, 270.0, 8.0, [0.0, 0.0, 0.0]),
     ("row3_270_8_yaw", turb3_row1, 270.0, 8.0, [20.0, -15.0, 10.0]),
     ("ablaincourt_240_10_flat", ablaincourt, 240.0, 10.0, [0.0] * 7),
 ]
+
+
+def _floris_reference(
+    layout: FarmLayout, direction: float, speed: float, yaw: list[float]
+) -> dict[str, npt.NDArray[np.float64]]:
+    fmodel = FlorisModel("defaults")
+    fmodel.set(
+        layout_x=np.asarray(layout.x),
+        layout_y=np.asarray(layout.y),
+        wind_directions=[direction],
+        wind_speeds=[speed],
+        turbulence_intensities=[AMBIENT_TI],
+        yaw_angles=np.asarray([yaw]),
+    )
+    fmodel.run()
+    flow = fmodel.core.flow_field
+    return {
+        "powers": fmodel.get_turbine_powers().flatten(),
+        "turbulence_intensities": fmodel.get_turbine_TIs().flatten(),
+        "u": flow.u[0],
+        "v": flow.v[0],
+        "w": flow.w[0],
+    }
+
+
+@pytest.fixture(scope="session")
+def floris_reference() -> dict[str, dict[str, npt.NDArray[np.float64]]]:
+    return {
+        case_id: _floris_reference(build_layout(), direction, speed, yaw)
+        for case_id, build_layout, direction, speed, yaw in CASES
+    }
 
 
 @pytest.mark.parametrize(
@@ -50,8 +73,9 @@ def test_flow_ti_and_power_match_floris(
     direction: float,
     speed: float,
     yaw: tuple[float, ...],
+    floris_reference: dict[str, dict[str, npt.NDArray[np.float64]]],
 ) -> None:
-    golden = _load("floris_v4.6.6.npz")
+    reference = floris_reference[case_id]
     layout: FarmLayout = build_layout()
     turbine = nrel5mw_v4()
     yaw_arr = jnp.asarray(yaw)
@@ -60,38 +84,36 @@ def test_flow_ti_and_power_match_floris(
     solution = solve_farm(layout, wind, yaw_arr, turbine=turbine)
 
     np.testing.assert_allclose(
-        np.asarray(solution.u), golden[f"{case_id}/u"], rtol=RTOL, atol=1e-9
+        np.asarray(solution.u), reference["u"], rtol=RTOL, atol=1e-9
     )
     np.testing.assert_allclose(
-        np.asarray(solution.v), golden[f"{case_id}/v"], rtol=RTOL, atol=1e-9
+        np.asarray(solution.v), reference["v"], rtol=RTOL, atol=1e-9
     )
     np.testing.assert_allclose(
-        np.asarray(solution.w), golden[f"{case_id}/w"], rtol=RTOL, atol=1e-9
+        np.asarray(solution.w), reference["w"], rtol=RTOL, atol=1e-9
     )
     np.testing.assert_allclose(
         np.asarray(solution.turbulence_intensity),
-        golden[f"{case_id}/turbulence_intensities"],
+        reference["turbulence_intensities"],
         rtol=RTOL,
     )
 
     powers = turbine_powers(solution.u, yaw_arr, turbine=turbine)
-    np.testing.assert_allclose(
-        np.asarray(powers), golden[f"{case_id}/powers"], rtol=RTOL
-    )
+    np.testing.assert_allclose(np.asarray(powers), reference["powers"], rtol=RTOL)
 
 
-def test_row3_270_8_zeroyaw_regression_anchor() -> None:
-    # Hardcoded FLORIS 4.6.6 output; guards both the solver and the frozen golden
-    # against silent drift (e.g. a corrupted or wrongly regenerated npz).
+def test_row3_270_8_zeroyaw_regression_anchor(
+    floris_reference: dict[str, dict[str, npt.NDArray[np.float64]]],
+) -> None:
+    # Hardcoded FLORIS 4.6.6 output; guards both the solver and the live FLORIS
+    # reference against silent drift (e.g. an upstream floris version bump).
     anchor_powers = np.array([1753954.45917917, 356384.89485703, 344414.69675443])
     anchor_ti = np.array([0.06021557, 0.10448007, 0.12594702])
 
-    golden = _load("floris_v4.6.6.npz")
+    reference = floris_reference["row3_270_8_flat"]
+    np.testing.assert_allclose(reference["powers"], anchor_powers, rtol=1e-6)
     np.testing.assert_allclose(
-        golden["row3_270_8_flat/powers"], anchor_powers, rtol=1e-6
-    )
-    np.testing.assert_allclose(
-        golden["row3_270_8_flat/turbulence_intensities"], anchor_ti, rtol=1e-6
+        reference["turbulence_intensities"], anchor_ti, rtol=1e-6
     )
 
     layout = turb3_row1()

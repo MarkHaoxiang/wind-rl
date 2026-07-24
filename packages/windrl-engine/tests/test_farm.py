@@ -2,12 +2,13 @@
 
 import math
 from importlib.resources import files
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-import numpy.typing as npt
 import pytest
+import yaml  # type: ignore[import-untyped]
 
 from windrl_engine.farm.layout import horns_rev2, row_layout
 from windrl_engine.farm.turbine import D, ct_lookup, nrel5mw_v4, power_lookup
@@ -73,33 +74,41 @@ def test_horns_rev2_has_91_turbines() -> None:
     assert layout.y.shape == (91,)
 
 
-# --- nrel_5MW v4 tables: package data <-> turbine.py consistency -------------
+# --- nrel_5MW v4 tables: floris yaml <-> turbine.py consistency --------------
 
 
-def _shipped_npz() -> dict[str, npt.NDArray[np.float64]]:
-    resource = files("windrl_engine.farm.data") / "nrel5mw_v4.npz"
-    with resource.open("rb") as fh, np.load(fh) as npz:
-        return {key: npz[key] for key in npz.files}
+def _floris_nrel5mw_yaml() -> dict[str, Any]:
+    text = (files("floris") / "turbine_library" / "nrel_5MW.yaml").read_text()
+    return yaml.safe_load(text)
 
 
-def test_shipped_npz_matches_turbine_spec() -> None:
-    # The committed artifact is generated from floris 4.6.6's yaml
-    # (tests/generate_turbine_data.py); guard it against silent drift from what
-    # turbine.py loads and exposes.
-    npz = _shipped_npz()
+def test_turbine_spec_matches_floris_yaml() -> None:
+    # turbine.py reads floris's packaged yaml at import; assert against that same
+    # source so upstream drift is caught without a committed intermediate.
     spec = nrel5mw_v4()
+    yml = _floris_nrel5mw_yaml()
+    table = yml["power_thrust_table"]
 
-    assert npz["wind_speed"].shape == (54,)
-    np.testing.assert_array_equal(np.asarray(spec.wind_speed_table), npz["wind_speed"])
-    np.testing.assert_array_equal(np.asarray(spec.thrust_table), npz["thrust"])
-    np.testing.assert_array_equal(np.asarray(spec.power_table), npz["power_kw"])
+    assert spec.wind_speed_table.shape == (54,)
+    np.testing.assert_array_equal(
+        np.asarray(spec.wind_speed_table), np.asarray(table["wind_speed"])
+    )
+    np.testing.assert_array_equal(
+        np.asarray(spec.thrust_table), np.asarray(table["thrust_coefficient"])
+    )
+    np.testing.assert_array_equal(
+        np.asarray(spec.power_table), np.asarray(table["power"])
+    )
 
-    assert spec.rotor_diameter == pytest.approx(125.88)
-    assert spec.hub_height == pytest.approx(90.0)
-    assert spec.pP == pytest.approx(1.88)
-    assert spec.tsr == pytest.approx(8.0)
-    assert spec.ref_density == pytest.approx(1.225)
-    assert spec.generator_efficiency == pytest.approx(0.944)
+    assert spec.rotor_diameter == yml["rotor_diameter"]
+    assert spec.hub_height == yml["hub_height"]
+    assert spec.pP == table["cosine_loss_exponent_yaw"]
+    assert spec.tsr == yml["TSR"]
+    assert spec.ref_density == table["ref_air_density"]
+    assert (
+        spec.generator_efficiency
+        == table["controller_dependent_turbine_parameters"]["generator_efficiency"]
+    )
 
 
 def test_ct_lookup_matches_table_at_a_nonzero_node() -> None:

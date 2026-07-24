@@ -17,15 +17,14 @@ py3.12 venv, fully declared in the package `pyproject.toml`s (`uv sync`).
 ## `windrl-engine`
 
 From-scratch JAX reimplementation of the WFCRL/FLORIS GCH wake model,
-verified to ~1e-13 against a frozen FLORIS 4.6.6 golden
-(`tests/goldens/floris_v4.6.6.npz`), so neither WFCRL nor FLORIS is a
-dependency;
+verified live to ~1e-13 against FLORIS 4.6.6 (a pinned runtime dependency;
+WFCRL is not);
 pure-functional (`NamedTuple` PyTrees, single-farm cores, batched via
 `jit(vmap)`), layered `farm` -> `physics` -> `env` (plus `design` and
 `analysis`), each layer importing only from lower ones.
 
-- `farm/`: `turbine.py` (`TurbineSpec`, NREL-5MW loaded from generated
-  package data `farm/data/nrel5mw_v4.npz`), `layout.py`
+- `farm/`: `turbine.py` (`TurbineSpec`, NREL-5MW read from FLORIS's packaged
+  `nrel_5MW.yaml` at import via `farm/floris_tables.py`), `layout.py`
   (`FarmLayout` + registry `turb3_row1`/`ablaincourt`/`horns_rev2`),
   `wind.py` (`WindCondition`, sampling, `WindRose`), `state.py` (`FarmState`:
   yaws + wind).
@@ -42,7 +41,7 @@ pure-functional (`NamedTuple` PyTrees, single-farm cores, batched via
   no `Protocol` — current designers are stateless closures), `SiteSpec`,
   `project_feasible` min-spacing projection, random/grid designers.
 - `analysis/`: `flow_viz.py`, `metrics.py` (wind-rose power), `plots.py`.
-- `tests/`: golden parity against FLORIS 4.6.6, physics invariants, and a
+- `tests/`: live parity against FLORIS 4.6.6, physics invariants, and a
   beartype import hook that makes jaxtyping shape annotations
   runtime-checked.
 
