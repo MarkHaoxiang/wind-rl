@@ -41,6 +41,10 @@ pure-functional (`NamedTuple` PyTrees, single-farm cores, batched via
   no `Protocol` — current designers are stateless closures), `SiteSpec`,
   `project_feasible` min-spacing projection, random/grid designers.
 - `analysis/`: `flow_viz.py`, `metrics.py` (wind-rose power), `plots.py`.
+- `viz/`: episode replay — `record.py` (`EpisodeRecord` + `.npz` save/load and
+  the recorder), `field.py` (per-frame hub-height wake fields, cached),
+  `server.py` + `app.html` (stdlib HTTP server and the bundled canvas viewer,
+  run via `python -m windrl_engine.viz episode.npz`).
 - `tests/`: live parity against FLORIS 4.6.6, physics invariants, and a
   beartype import hook that makes jaxtyping shape annotations
   runtime-checked.
