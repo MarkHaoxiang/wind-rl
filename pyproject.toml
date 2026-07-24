@@ -61,7 +61,9 @@ warn_required_dynamic_aliases = true
 # Third-party packages that ship little or no typing. Mava and jumanji live in
 # the shared venv now; they have no py.typed, so imports from them are untyped.
 [[tool.mypy.overrides]]
-module = ["wandb.*", "hydra.*", "mava.*", "jumanji.*"]
+# floris exists only inside the isolated golden/turbine-data generator runs
+# (`uv run --isolated --with floris==...`), never in this venv.
+module = ["wandb.*", "hydra.*", "mava.*", "jumanji.*", "floris.*"]
 ignore_missing_imports = true
 
 # The Mava/jumanji-touching trainer modules wrap an untyped framework: strict

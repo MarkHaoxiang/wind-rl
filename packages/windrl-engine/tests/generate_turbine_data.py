@@ -18,13 +18,12 @@ that disagrees fails loudly.
 
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
 
 import numpy as np
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 
-def _find_scalar(node: Any, key: str) -> float:
+def _find_scalar(node: object, key: str) -> float:
     """Depth-first search for ``key`` anywhere in the parsed YAML tree."""
     if isinstance(node, dict):
         if key in node and not isinstance(node[key], (dict, list)):

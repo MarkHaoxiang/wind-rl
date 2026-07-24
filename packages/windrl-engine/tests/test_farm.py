@@ -6,6 +6,7 @@ from importlib.resources import files
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from windrl_engine.farm.layout import horns_rev2, row_layout
@@ -75,7 +76,7 @@ def test_horns_rev2_has_91_turbines() -> None:
 # --- nrel_5MW v4 tables: package data <-> turbine.py consistency -------------
 
 
-def _shipped_npz() -> dict[str, np.ndarray]:
+def _shipped_npz() -> dict[str, npt.NDArray[np.float64]]:
     resource = files("windrl_engine.farm.data") / "nrel5mw_v4.npz"
     with resource.open("rb") as fh, np.load(fh) as npz:
         return {key: npz[key] for key in npz.files}

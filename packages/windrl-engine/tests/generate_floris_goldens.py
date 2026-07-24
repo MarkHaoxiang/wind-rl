@@ -14,6 +14,7 @@ forever after. Run isolated so the project venv is never touched:
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 from floris import FlorisModel
 
 Case = tuple[str, list[float], list[float], float, float, list[float]]
@@ -50,7 +51,7 @@ CASES: list[Case] = [
 AMBIENT_TI = 0.06
 
 
-def solve(case: Case) -> dict[str, np.ndarray]:
+def solve(case: Case) -> dict[str, npt.NDArray[np.float64]]:
     _, x, y, direction, speed, yaw = case
     fmodel = FlorisModel("defaults")
     fmodel.set(
@@ -76,7 +77,9 @@ def solve(case: Case) -> dict[str, np.ndarray]:
 def main() -> None:
     import floris
 
-    out: dict[str, np.ndarray] = {"floris_version": np.asarray(floris.__version__)}
+    out: dict[str, npt.NDArray[np.float64]] = {
+        "floris_version": np.asarray(floris.__version__)
+    }
     for case in CASES:
         for key, value in solve(case).items():
             out[f"{case[0]}/{key}"] = np.asarray(value, dtype=np.float64)

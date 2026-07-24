@@ -9,10 +9,12 @@ building any FLORIS object. Both stacks run float64; the spec targets <1e-10
 relative, so 1e-9 leaves one order of margin.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from windrl_engine.farm.layout import FarmLayout, ablaincourt, turb3_row1
@@ -25,7 +27,7 @@ RTOL = 1e-9
 GOLDENS = Path(__file__).parent / "goldens"
 
 
-def _load(name: str) -> dict[str, np.ndarray]:
+def _load(name: str) -> dict[str, npt.NDArray[np.float64]]:
     with np.load(GOLDENS / name, allow_pickle=True) as data:
         return {key: data[key] for key in data.files}
 
@@ -42,7 +44,13 @@ CASES = [
     ("case_id", "build_layout", "direction", "speed", "yaw"),
     [pytest.param(*c, id=c[0]) for c in CASES],
 )
-def test_flow_ti_and_power_match_floris(case_id, build_layout, direction, speed, yaw):
+def test_flow_ti_and_power_match_floris(
+    case_id: str,
+    build_layout: Callable[[], FarmLayout],
+    direction: float,
+    speed: float,
+    yaw: tuple[float, ...],
+) -> None:
     golden = _load("floris_v4.6.6.npz")
     layout: FarmLayout = build_layout()
     turbine = nrel5mw_v4()
@@ -72,7 +80,7 @@ def test_flow_ti_and_power_match_floris(case_id, build_layout, direction, speed,
     )
 
 
-def test_row3_270_8_zeroyaw_regression_anchor():
+def test_row3_270_8_zeroyaw_regression_anchor() -> None:
     # Hardcoded FLORIS 4.6.6 output; guards both the solver and the frozen golden
     # against silent drift (e.g. a corrupted or wrongly regenerated npz).
     anchor_powers = np.array([1753954.45917917, 356384.89485703, 344414.69675443])
