@@ -66,6 +66,53 @@ Common Hydra overrides: `env.kwargs.layout` (`turb3_row1` | `ablaincourt` |
 `env.kwargs.load_coef`, `arch.num_envs`, `system.total_timesteps`. Logging is
 Mava's own console logger; enable others via `logger.loggers.<name>.enabled`.
 
+## GPU (NVIDIA CUDA 12)
+
+GPU is **opt-in** and never a hard dependency: CI is CPU-only and installs this
+package `--no-deps`, so it must never pull the multi-GB CUDA wheels. The venv is
+otherwise identical to the CPU setup above — the CUDA support is the `jax[cuda12]`
+plugin layered on top of Mava's CPU jaxlib.
+
+Install order is load-bearing. Mava re-pins jax during its editable install, so
+the CUDA plugin (declared as this package's `gpu` extra, `jax[cuda12]==0.5.3`)
+goes on **last**, or it gets clobbered:
+
+```bash
+VENV=$(pwd)/packages/windrl-train/.venv
+# 1-3. as in Setup above (Mava editable, then windrl-engine, then this package).
+# 4. CUDA plugin LAST — must match Mava's jax==0.5.3 pin.
+VIRTUAL_ENV=$VENV uv pip install --python $VENV/bin/python "jax[cuda12]==0.5.3"
+```
+
+The `jax[cuda12]==0.5.3` extra bundles CUDA 12.9 wheels, which cover Blackwell
+(`sm_120`, e.g. RTX 5090) via a recent driver's forward-compatible PTX JIT — a
+current NVIDIA driver (CUDA 12.8+ / 13.x runtime) is the only host requirement;
+no system CUDA toolkit is needed.
+
+Verify the plugin sees the GPU:
+
+```bash
+packages/windrl-train/.venv/bin/python -c "import jax; print(jax.devices())"
+# -> [CudaDevice(id=0)]
+```
+
+**`JAX_PLATFORMS` semantics.** With the CUDA plugin installed, jax defaults to
+the GPU. Force a backend explicitly:
+
+- `JAX_PLATFORMS=cuda` (or unset) — run on the GPU.
+- `JAX_PLATFORMS=cpu` — force CPU even with the plugin present (used by the
+  smoke/equivariance commands above and by CI, so they stay deterministic and
+  GPU-independent).
+
+The engine's FLORIS golden parity tests pass on GPU at `float64` to the same
+`rtol=1e-9` gate as CPU, so GPU is safe for evaluation as well as rollouts.
+Practical guidance from `bench/` (RTX 5090): the GPU wins big for `horns_rev2`
+(≈37× training throughput vs CPU) and for any large-batch solve, but for the
+tiny `turb3_row1`/`ablaincourt` farms at small batch the CPU is competitive or
+faster (GPU dispatch overhead dominates). `float64` throughput on consumer
+Blackwell is ~10× slower than `float32` for large farms — keep rollouts in
+`float32` and reserve `float64` for final evaluation.
+
 ## Weights & Biases
 
 Mava ships console/neptune/tensorboard/json loggers but no wandb one, so
