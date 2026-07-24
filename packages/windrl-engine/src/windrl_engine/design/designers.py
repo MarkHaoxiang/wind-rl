@@ -20,18 +20,22 @@ from windrl_engine.farm.layout import FarmLayout
 def fixed(layout: FarmLayout) -> Designer:
     coords = jnp.stack([layout.x, layout.y], axis=-1)  # (turbines, 2)
 
-    def designer(key: Key[Array, ""], batch: int) -> Float[Array, "batch turbines 2"]:
+    def designer(
+        key: Key[Array, ""], batch_size: int
+    ) -> Float[Array, "batch turbines 2"]:
         del key  # deterministic: the layout is tiled unchanged
-        return jnp.broadcast_to(coords, (batch, *coords.shape))
+        return jnp.broadcast_to(coords, (batch_size, *coords.shape))
 
     return designer
 
 
 def random_uniform(site: SiteSpec, n_turbines: int, iters: int = 200) -> Designer:
-    def designer(key: Key[Array, ""], batch: int) -> Float[Array, "batch turbines 2"]:
+    def designer(
+        key: Key[Array, ""], batch_size: int
+    ) -> Float[Array, "batch turbines 2"]:
         maxval = jnp.stack([site.x_extent, site.y_extent])
         proposals = jax.random.uniform(
-            key, (batch, n_turbines, 2), minval=0.0, maxval=maxval
+            key, (batch_size, n_turbines, 2), minval=0.0, maxval=maxval
         )
         return jax.vmap(lambda c: project_feasible(c, site, iters))(proposals)
 
