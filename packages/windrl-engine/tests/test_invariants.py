@@ -3,7 +3,7 @@
 import jax
 import jax.numpy as jnp
 
-from windrl_engine.env.env import reset, step
+from windrl_engine.env.env import reset, step, wfcrl_reward
 from windrl_engine.farm.layout import FarmLayout, row_layout
 from windrl_engine.farm.turbine import DEFAULT_TURBINE, HUB_HEIGHT
 from windrl_engine.farm.wind import WindCondition
@@ -147,7 +147,7 @@ def _run_trajectory(
     trace = [obs.yaw, obs.wind_speed, obs.wind_direction]
     for action in actions:
         state, obs, reward, _truncated = step(
-            layout, state, action, yaw_step=5.0, load_coef=0.1, horizon=10
+            layout, state, action, yaw_step=5.0, reward_fn=wfcrl_reward(0.1), horizon=10
         )
         trace.extend([obs.yaw, obs.wind_speed, obs.wind_direction, reward])
     return trace

@@ -68,13 +68,64 @@ def test_batched_step_matches_stacked_single_farm_step_calls() -> None:
             lane_state,
             actions[i],
             yaw_step=env.config.yaw_step,
-            load_coef=env.config.load_coef,
+            reward_fn=env.reward_fn,
             horizon=env.config.horizon,
         )
         assert jnp.allclose(obs.yaw[i], expected_obs.yaw, atol=1e-9)
         assert jnp.allclose(obs.freewind[i], expected_obs.freewind, atol=1e-9)
         assert jnp.allclose(reward[i], expected_reward, atol=1e-9)
         assert bool(truncated[i]) == bool(expected_truncated)
+
+
+def test_injected_reward_fn_changes_only_the_reward_value() -> None:
+    # A custom reward_fn (the default WFCRL reward negated) must leave every
+    # state/obs trajectory bitwise-identical to the default reward_fn's run in
+    # both the single-farm step and BatchedWindFarmEnv -- only the scalar reward
+    # differs, and by exactly the expected relationship.
+    config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=2, horizon=50)
+    default_env = BatchedWindFarmEnv(config)
+
+    def negated_reward(
+        powers_watts: jax.Array, loads: jax.Array, freestream_speed: jax.Array
+    ) -> jax.Array:
+        return -default_env.reward_fn(powers_watts, loads, freestream_speed)
+
+    key = jax.random.key(9)
+    action = jnp.asarray([3.0, -2.0])
+
+    state, _ = reset(default_env.layout, key)
+    default_state, default_obs, default_reward, default_truncated = step(
+        default_env.layout,
+        state,
+        action,
+        yaw_step=config.yaw_step,
+        reward_fn=default_env.reward_fn,
+        horizon=config.horizon,
+    )
+    custom_state, custom_obs, custom_reward, custom_truncated = step(
+        default_env.layout,
+        state,
+        action,
+        yaw_step=config.yaw_step,
+        reward_fn=negated_reward,
+        horizon=config.horizon,
+    )
+    assert jnp.array_equal(default_state.yaw, custom_state.yaw)
+    assert jnp.array_equal(default_obs.yaw, custom_obs.yaw)
+    assert bool(default_truncated) == bool(custom_truncated)
+    assert jnp.allclose(custom_reward, -default_reward, atol=1e-9)
+
+    custom_env = BatchedWindFarmEnv(config, reward_fn=negated_reward)
+    default_obs_b = default_env.reset(key)
+    custom_obs_b = custom_env.reset(key)
+    assert jnp.array_equal(default_obs_b.yaw, custom_obs_b.yaw)
+
+    actions = jnp.asarray([[3.0, -2.0], [0.0, 0.0]])
+    default_obs_b, default_reward_b, default_trunc_b = default_env.step(actions)
+    custom_obs_b, custom_reward_b, custom_trunc_b = custom_env.step(actions)
+    assert jnp.array_equal(default_obs_b.yaw, custom_obs_b.yaw)
+    assert jnp.array_equal(default_trunc_b, custom_trunc_b)
+    assert jnp.allclose(custom_reward_b, -default_reward_b, atol=1e-9)
 
 
 def test_reset_gives_each_lane_an_independent_wind_draw() -> None:
@@ -235,7 +286,7 @@ def test_per_env_layouts_make_each_lane_solve_its_own_layout() -> None:
             lane_state,
             actions[i],
             yaw_step=env.config.yaw_step,
-            load_coef=env.config.load_coef,
+            reward_fn=env.reward_fn,
             horizon=env.config.horizon,
         )
         assert jnp.allclose(reward[i], expected_reward)

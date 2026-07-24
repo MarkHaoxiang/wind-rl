@@ -23,6 +23,7 @@ from windrl_engine.env.config import WindFarmEnvConfig
 from windrl_engine.env.env import (
     WIND_DIRECTION_MAX,
     WIND_SPEED_MAX,
+    wfcrl_reward,
 )
 from windrl_engine.env.env import (
     reset as core_reset,
@@ -92,6 +93,7 @@ class WindFarm(Environment):
             else None
         )
         self.layout = self._core_config.build_layout()
+        self._reward_fn = wfcrl_reward(self._core_config.load_coef)
         self._norm_positions = _normalize_positions(self.layout.x, self.layout.y)
         self.add_global_state = add_global_state
         self.num_agents = int(self.layout.x.shape[0])
@@ -143,7 +145,7 @@ class WindFarm(Environment):
             state,
             delta_yaw,
             yaw_step=yaw_step,
-            load_coef=self._core_config.load_coef,
+            reward_fn=self._reward_fn,
             horizon=self.time_limit,
         )
         # A traced array stands in for the StepType enum, as in Mava's own wrappers.

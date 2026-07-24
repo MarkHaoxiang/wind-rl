@@ -70,16 +70,29 @@ def reset(
     return state, _observation(state.yaw, resolved, speed, direction)
 
 
-def _reward(
-    powers_watts: Float[Array, "turbines"],
-    loads: Float[Array, "turbines 4"],
-    freestream_speed: Float[Array, ""],
-    load_coef: float,
-) -> Float[Array, ""]:
-    powers_mw = powers_watts / 1e6
-    normalized = powers_mw * 1e3 / freestream_speed**3
-    load_penalty = jnp.mean(jnp.abs(loads))
-    return jnp.mean(normalized) - load_coef * load_penalty
+#: Computes a farm's scalar reward from quantities the step already solved for
+#: (no re-solving the wake): per-turbine power and load proxies, plus the
+#: freestream speed used to normalize power. Must be jit/vmap-compatible.
+RewardFn = Callable[
+    [Float[Array, "turbines"], Float[Array, "turbines 4"], Float[Array, ""]],
+    Float[Array, ""],
+]
+
+
+def wfcrl_reward(load_coef: float) -> RewardFn:
+    """The WFCRL reward: mean normalized power minus ``load_coef`` times mean |load|."""
+
+    def reward_fn(
+        powers_watts: Float[Array, "turbines"],
+        loads: Float[Array, "turbines 4"],
+        freestream_speed: Float[Array, ""],
+    ) -> Float[Array, ""]:
+        powers_mw = powers_watts / 1e6
+        normalized = powers_mw * 1e3 / freestream_speed**3
+        load_penalty = jnp.mean(jnp.abs(loads))
+        return jnp.mean(normalized) - load_coef * load_penalty
+
+    return reward_fn
 
 
 def _step_core(
@@ -88,7 +101,7 @@ def _step_core(
     action: Float[Array, "turbines"],
     *,
     yaw_step: float,
-    load_coef: float,
+    reward_fn: RewardFn,
     horizon: int,
     control_mode: ControlMode,
     fidelity: Fidelity = "floris",
@@ -118,7 +131,7 @@ def _step_core(
         step_count=step_count,
     )
     obs = _observation(applied.yaw, state.wind, speed, direction)
-    reward = _reward(powers, loads, freestream_speed, load_coef)
+    reward = reward_fn(powers, loads, freestream_speed)
     truncated = step_count == horizon
     return new_state, obs, reward, truncated
 
@@ -129,7 +142,7 @@ def step(
     action: Float[Array, "turbines"],
     *,
     yaw_step: float,
-    load_coef: float,
+    reward_fn: RewardFn,
     horizon: int,
     fidelity: Fidelity = "floris",
     turbine: TurbineSpec = DEFAULT_TURBINE,
@@ -139,7 +152,7 @@ def step(
         state,
         action,
         yaw_step=yaw_step,
-        load_coef=load_coef,
+        reward_fn=reward_fn,
         horizon=horizon,
         control_mode="continuous",
         fidelity=fidelity,
@@ -196,7 +209,7 @@ def _batched_step(
     turbine: TurbineSpec,
     *,
     yaw_step: float,
-    load_coef: float,
+    reward_fn: RewardFn,
     horizon: int,
     control_mode: ControlMode,
     fidelity: Fidelity,
@@ -214,7 +227,7 @@ def _batched_step(
             state,
             action,
             yaw_step=yaw_step,
-            load_coef=load_coef,
+            reward_fn=reward_fn,
             horizon=horizon,
             control_mode=control_mode,
             fidelity=fidelity,
@@ -274,12 +287,12 @@ def _batched_reset(
     return jax.vmap(reset_one_farm, in_axes=(layout_axis, 0))(layout, keys)
 
 
-_STEP_STATIC: Final = ("yaw_step", "load_coef", "horizon", "control_mode", "fidelity")
+_STEP_STATIC: Final = ("yaw_step", "reward_fn", "horizon", "control_mode", "fidelity")
 
 
 class _StepStatics(TypedDict):
     yaw_step: float
-    load_coef: float
+    reward_fn: RewardFn
     horizon: int
     control_mode: ControlMode
     fidelity: Fidelity
@@ -296,11 +309,16 @@ class BatchedWindFarmEnv:
     each lane solve its own fixed layout instead of the shared default.
     """
 
-    def __init__(self, config: WindFarmEnvConfig) -> None:
+    def __init__(
+        self, config: WindFarmEnvConfig, reward_fn: RewardFn | None = None
+    ) -> None:
         self.config = config
         self.layout = config.build_layout()
         self.n_turbines = int(self.layout.x.shape[0])
         self.turbine = config.build_turbine()
+        self.reward_fn = (
+            wfcrl_reward(config.load_coef) if reward_fn is None else reward_fn
+        )
         self._reset_jit = jax.jit(
             _batched_reset, static_argnames=("fidelity", "per_env_layout")
         )
@@ -316,7 +334,7 @@ class BatchedWindFarmEnv:
     def _step_kwargs(self) -> _StepStatics:
         return {
             "yaw_step": self.config.yaw_step,
-            "load_coef": self.config.load_coef,
+            "reward_fn": self.reward_fn,
             "horizon": self.config.horizon,
             "control_mode": self.config.control_mode,
             "fidelity": self.config.fidelity,
@@ -454,7 +472,7 @@ def _rollout_core(
     turbine: TurbineSpec,
     *,
     yaw_step: float,
-    load_coef: float,
+    reward_fn: RewardFn,
     horizon: int,
     control_mode: ControlMode,
     fidelity: Fidelity,
@@ -477,7 +495,7 @@ def _rollout_core(
             env_key,
             turbine,
             yaw_step=yaw_step,
-            load_coef=load_coef,
+            reward_fn=reward_fn,
             horizon=horizon,
             control_mode=control_mode,
             fidelity=fidelity,

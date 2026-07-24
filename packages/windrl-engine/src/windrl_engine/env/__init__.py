@@ -10,8 +10,10 @@ from windrl_engine.env.env import (
     Actor,
     BatchedWindFarmEnv,
     Observation,
+    RewardFn,
     reset,
     step,
+    wfcrl_reward,
 )
 from windrl_engine.env.spaces import Box, MultiDiscrete, Space
 
@@ -23,6 +25,7 @@ __all__ = [
     "ControlMode",
     "MultiDiscrete",
     "Observation",
+    "RewardFn",
     "Space",
     "WindFarmEnvConfig",
     "apply_action",
@@ -30,4 +33,5 @@ __all__ = [
     "duty_cycle_limiter",
     "reset",
     "step",
+    "wfcrl_reward",
 ]

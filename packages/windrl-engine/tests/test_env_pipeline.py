@@ -19,6 +19,7 @@ from windrl_engine.env.env import (
     BatchedWindFarmEnv,
     reset,
     step,
+    wfcrl_reward,
 )
 from windrl_engine.farm.layout import row_layout
 
@@ -133,7 +134,12 @@ def test_step_truncates_on_the_horizon_minus_1th_agent_step() -> None:
     expected_truncated = [False, False, False, True]
     for expected in expected_truncated:
         state, _, _, truncated = step(
-            layout, state, jnp.zeros(2), yaw_step=5.0, load_coef=0.1, horizon=horizon
+            layout,
+            state,
+            jnp.zeros(2),
+            yaw_step=5.0,
+            reward_fn=wfcrl_reward(0.1),
+            horizon=horizon,
         )
         assert bool(truncated) == expected
     assert int(state.step_count) == horizon

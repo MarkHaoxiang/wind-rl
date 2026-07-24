@@ -26,6 +26,7 @@ import jax.numpy as jnp
 from windrl_engine.env.config import WindFarmEnvConfig
 from windrl_engine.env.env import reset as core_reset
 from windrl_engine.env.env import step as core_step
+from windrl_engine.env.env import wfcrl_reward
 from windrl_engine.farm.wind import WindCondition
 from windrl_train.config import Config
 from windrl_train.settings import WindRlSettings
@@ -128,6 +129,7 @@ def zero_policy_return(env: EnvConf) -> float:
     )
     state, _ = core_reset(layout, jax.random.PRNGKey(0), wind=wind)
     zero_action = jnp.zeros(n_turbines)
+    reward_fn = wfcrl_reward(env.load_coef)
     total = 0.0
     for _ in range(env.horizon):
         state, _obs, reward, _truncated = core_step(
@@ -135,7 +137,7 @@ def zero_policy_return(env: EnvConf) -> float:
             state,
             zero_action,
             yaw_step=env.yaw_step,
-            load_coef=env.load_coef,
+            reward_fn=reward_fn,
             horizon=env.horizon,
         )
         total += float(reward)
