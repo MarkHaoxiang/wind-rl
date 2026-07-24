@@ -6,7 +6,7 @@ import pytest
 
 from windrl_engine.env.config import WindFarmEnvConfig
 from windrl_engine.env.env import BatchedWindFarmEnv, Observation, reset, step
-from windrl_engine.env.spaces import MultiDiscrete
+from windrl_engine.env.spaces import Box, MultiDiscrete
 from windrl_engine.farm.layout import FarmLayout
 
 _LAYOUT = [(0.0, 0.0), (504.0, 0.0)]
@@ -249,6 +249,29 @@ def test_discrete_control_mode_matches_the_equivalent_continuous_delta_stream() 
         assert jnp.allclose(obs_d.yaw, obs_c.yaw, atol=1e-9)
         assert jnp.allclose(reward_d, reward_c, atol=1e-9)
         assert jnp.array_equal(truncated_d, truncated_c)
+
+
+def test_action_space_continuous_bounds_match_the_configured_yaw_step() -> None:
+    config = WindFarmEnvConfig(layout=_LAYOUT, control_mode="continuous", yaw_step=7.0)
+    env = BatchedWindFarmEnv(config)
+
+    space = env.action_space()
+    assert isinstance(space, Box)
+    assert space.shape == (2,)
+    assert space.low == -7.0
+    assert space.high == 7.0
+
+
+def test_step_before_reset_raises() -> None:
+    env = BatchedWindFarmEnv(WindFarmEnvConfig(layout=_LAYOUT, n_envs=2))
+    with pytest.raises(RuntimeError, match="reset"):
+        env.step(jnp.zeros((2, 2)))
+
+
+def test_rollout_before_reset_raises() -> None:
+    env = BatchedWindFarmEnv(WindFarmEnvConfig(layout=_LAYOUT, n_envs=2))
+    with pytest.raises(RuntimeError, match="reset"):
+        env.rollout(jax.random.key(0), 3)
 
 
 # --- Per-env layouts (co-design seam, contract A) -----------------------------

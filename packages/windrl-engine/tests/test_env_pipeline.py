@@ -21,7 +21,7 @@ from windrl_engine.env.env import (
     step,
     wfcrl_reward,
 )
-from windrl_engine.farm.layout import row_layout
+from windrl_engine.farm.layout import ablaincourt, row_layout
 
 
 def test_action_pipeline_constants_match_wfcrl_defaults() -> None:
@@ -115,6 +115,39 @@ def test_apply_action_duty_cycle_zeroing_first_bites_on_the_second_call() -> Non
         assert float(yaw[0]) == expected
 
 
+def test_corrected_fidelity_holds_where_floris_fidelity_moves_down_on_a_duty_limited_discrete_up_action() -> (
+    None
+):
+    # Duty-limited turbine picks discrete index 2 ("up"). "floris" fidelity zeros
+    # the *raw action* first, and a zeroed discrete index maps to -yaw_step (a
+    # down move); "corrected" fidelity zeros the *mapped command* instead, so the
+    # same over-active turbine holds at a 0 delta.
+    accumulator = jnp.asarray([5.0])
+    step_count = jnp.asarray(2)  # 5/0.3/2/60 = 0.1389 >= DUTY_FRACTION
+    action = jnp.asarray([2.0])
+
+    floris = apply_action(
+        yaw=jnp.zeros(1),
+        accumulator=accumulator,
+        step_count=step_count,
+        action=action,
+        yaw_step=5.0,
+        control_mode="discrete",
+        fidelity="floris",
+    )
+    corrected = apply_action(
+        yaw=jnp.zeros(1),
+        accumulator=accumulator,
+        step_count=step_count,
+        action=action,
+        yaw_step=5.0,
+        control_mode="discrete",
+        fidelity="corrected",
+    )
+    assert float(floris.yaw[0]) == -5.0
+    assert float(corrected.yaw[0]) == 0.0
+
+
 def test_reset_initializes_step_count_to_1_for_the_burn_in_solve() -> None:
     # reset runs a 1-step zero-yaw burn-in before the first agent action
     # (matching WFCRL's convention), so the fresh state's step_count starts at
@@ -157,3 +190,10 @@ def test_observation_space_freewind_bounds_match_the_actual_clipping() -> None:
     high = jnp.broadcast_to(jnp.asarray(space.high, dtype=jnp.float64), space.shape)
     assert jnp.allclose(low, jnp.asarray([0.0, 0.0]))
     assert jnp.allclose(high, jnp.asarray([WIND_SPEED_MAX, WIND_DIRECTION_MAX]))
+
+
+def test_build_layout_resolves_a_named_layout_string_to_its_builder() -> None:
+    layout = WindFarmEnvConfig(layout="ablaincourt").build_layout()
+    expected = ablaincourt()
+    assert jnp.array_equal(layout.x, expected.x)
+    assert jnp.array_equal(layout.y, expected.y)

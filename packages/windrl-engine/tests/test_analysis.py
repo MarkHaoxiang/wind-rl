@@ -2,9 +2,14 @@
 
 import jax.numpy as jnp
 
-from windrl_engine.analysis.flow_viz import horizontal_slice
+from windrl_engine.analysis.flow_viz import (
+    PAD_DIAMETERS,
+    horizontal_slice,
+    vertical_slice,
+)
 from windrl_engine.analysis.metrics import HOURS_PER_YEAR, aep, power_surface, wake_loss
 from windrl_engine.farm.layout import FarmLayout, row_layout
+from windrl_engine.farm.turbine import D
 from windrl_engine.farm.wind import WindCondition, WindRose, make_wind_rose
 
 
@@ -140,4 +145,47 @@ def test_horizontal_slice_shows_a_deficit_directly_downstream_of_a_turbine() -> 
     # aligns with the row, column index 2 (x=252) sits between the turbines,
     # directly downstream of turbine 0.
     downstream_point = field[1, 2]
+    assert float(downstream_point) < float(wind.speed) - 1e-3
+
+
+def test_horizontal_slice_default_bounds_pad_the_layout_extent_by_pad_diameters() -> (
+    None
+):
+    layout = row_layout(2)  # x in [0, 504], y in [0, 0]
+    wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
+    pad = PAD_DIAMETERS * D
+
+    _, extent = horizontal_slice(layout, wind, jnp.zeros(2), resolution=(3, 3))
+    assert extent == (0.0 - pad, 504.0 + pad, 0.0 - pad, 0.0 + pad)
+
+
+# --- flow_viz.vertical_slice --------------------------------------------------
+
+
+def test_vertical_slice_default_bounds_pad_the_wind_aligned_x_extent_with_a_fixed_z_range() -> (
+    None
+):
+    layout = row_layout(2)
+    wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
+    pad = PAD_DIAMETERS * D
+
+    _, extent = vertical_slice(layout, wind, jnp.zeros(2), resolution=(3, 3))
+    assert extent == (0.0 - pad, 504.0 + pad, 1.0, 270.0)
+
+
+def test_vertical_slice_shows_a_deficit_directly_downstream_of_a_turbine_at_hub_height() -> (
+    None
+):
+    layout = row_layout(2)  # turbines at world x=0 and x=504
+    wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
+    bounds = (-252.0, 756.0, 0.0, 180.0)  # z=90 (hub height) lands at row index 1
+
+    field, _ = vertical_slice(
+        layout, wind, jnp.zeros(2), bounds=bounds, resolution=(5, 3)
+    )
+    # Grid x = [-252, 0, 252, 504, 756]; column 0 is 2 diameters upstream of every
+    # turbine, column 2 sits directly downstream of the turbine at x=0.
+    upstream_point = field[1, 0]
+    downstream_point = field[1, 2]
+    assert jnp.allclose(upstream_point, wind.speed)
     assert float(downstream_point) < float(wind.speed) - 1e-3
