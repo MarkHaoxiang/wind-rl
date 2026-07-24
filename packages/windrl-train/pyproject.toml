@@ -23,6 +23,17 @@ dependencies = [
     # train-smoke job. Pinned SHA: e1cc61dd0d3a5e02cab126cfb46ddcb7c32a5fdf
 ]
 
+[project.optional-dependencies]
+# GPU (NVIDIA CUDA 12) support. Opt-in only — never a hard dependency, so CI
+# (CPU-only, installs this package `--no-deps`) never pulls the multi-GB CUDA
+# wheels. The jax version MUST match Mava's pin (jax==0.5.3); this extra just
+# adds the `cuda12` plugin (jax-cuda12-plugin / -pjrt + nvidia-* wheels) on top
+# of the CPU jaxlib Mava already installs. Install order matters — see the
+# README "GPU" section: Mava first (it re-pins jax), then this extra LAST, or the
+# plugin gets clobbered. The bundled wheels are CUDA 12.9, which covers Blackwell
+# (sm_120, e.g. RTX 5090) via a recent driver's forward-compatible PTX JIT.
+gpu = ["jax[cuda12]==0.5.3"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
