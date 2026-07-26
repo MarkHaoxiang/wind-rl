@@ -11,8 +11,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -49,7 +47,8 @@ jobs:
             fi;
           done
 
-      # The FLORIS reference tests assert against committed goldens, so nothing
-      # imports floris at test time and the whole suite runs unfiltered.
+      # The FLORIS reference tests run FLORIS live in-process (a pinned
+      # dependency), so the whole suite runs unfiltered with no separate
+      # golden-generation step.
       - name: Pytest
         run: JAX_PLATFORMS=cpu uv run pytest -q
