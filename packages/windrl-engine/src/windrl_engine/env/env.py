@@ -94,7 +94,7 @@ def wfcrl_reward(load_coef: float) -> RewardFn:
     return reward_fn
 
 
-def _step_core(
+def step(
     layout: FarmLayout,
     state: FarmState,
     action: Float[Array, "turbines"],
@@ -102,7 +102,7 @@ def _step_core(
     yaw_step: float,
     reward_fn: RewardFn,
     horizon: int,
-    control_mode: ControlMode,
+    control_mode: ControlMode = "continuous",
     fidelity: Fidelity = "floris",
     turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
@@ -133,30 +133,6 @@ def _step_core(
     reward = reward_fn(powers, loads, freestream_speed)
     truncated = step_count == horizon
     return new_state, obs, reward, truncated
-
-
-def step(
-    layout: FarmLayout,
-    state: FarmState,
-    action: Float[Array, "turbines"],
-    *,
-    yaw_step: float,
-    reward_fn: RewardFn,
-    horizon: int,
-    fidelity: Fidelity = "floris",
-    turbine: TurbineSpec = DEFAULT_TURBINE,
-) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
-    return _step_core(
-        layout,
-        state,
-        action,
-        yaw_step=yaw_step,
-        reward_fn=reward_fn,
-        horizon=horizon,
-        control_mode="continuous",
-        fidelity=fidelity,
-        turbine=turbine,
-    )
 
 
 Actor = Callable[[Key[Array, ""], Observation], Float[Array, "envs turbines"]]
@@ -200,7 +176,7 @@ def _batched_step(
     def step_one_farm(
         layout: FarmLayout, state: FarmState, action: Float[Array, "turbines"]
     ) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
-        return _step_core(
+        return step(
             layout,
             state,
             action,

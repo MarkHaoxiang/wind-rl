@@ -5,7 +5,13 @@ import jax.numpy as jnp
 import pytest
 
 from windrl_engine.env.config import WindFarmEnvConfig
-from windrl_engine.env.env import BatchedWindFarmEnv, Observation, reset, step
+from windrl_engine.env.env import (
+    BatchedWindFarmEnv,
+    Observation,
+    reset,
+    step,
+    wfcrl_reward,
+)
 from windrl_engine.env.spaces import Box, MultiDiscrete
 from windrl_engine.farm.layout import FarmLayout
 
@@ -249,6 +255,36 @@ def test_discrete_control_mode_matches_the_equivalent_continuous_delta_stream() 
         assert jnp.allclose(obs_d.yaw, obs_c.yaw, atol=1e-9)
         assert jnp.allclose(reward_d, reward_c, atol=1e-9)
         assert jnp.array_equal(truncated_d, truncated_c)
+
+
+def test_single_farm_step_honours_the_requested_control_mode() -> None:
+    # The same action array means different things per mode: index 2 is "+yaw_step"
+    # discretely and a 2 deg delta continuously.
+    layout = FarmLayout(x=jnp.asarray([0.0, 504.0]), y=jnp.zeros(2))
+    state, _ = reset(layout, jax.random.key(4))
+    action = jnp.asarray([2.0, 0.0])
+    reward_fn = wfcrl_reward(0.1)
+
+    discrete_state, *_ = step(
+        layout,
+        state,
+        action,
+        yaw_step=5.0,
+        reward_fn=reward_fn,
+        horizon=50,
+        control_mode="discrete",
+    )
+    continuous_state, *_ = step(
+        layout,
+        state,
+        action,
+        yaw_step=5.0,
+        reward_fn=reward_fn,
+        horizon=50,
+        control_mode="continuous",
+    )
+    assert jnp.array_equal(discrete_state.yaw, jnp.asarray([5.0, -5.0]))
+    assert jnp.array_equal(continuous_state.yaw, jnp.asarray([2.0, 0.0]))
 
 
 def test_action_space_continuous_bounds_match_the_configured_yaw_step() -> None:
