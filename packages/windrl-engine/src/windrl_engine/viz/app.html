@@ -219,11 +219,23 @@ function sizeStage() {
   state.drawRect = { x: (w - dw) / 2, y: (h - dh) / 2, w: dw, h: dh };
 }
 
+const FIELD_CACHE_LIMIT = 64; // ~230 KB/frame; caps the in-tab budget at ~15 MB
+
 async function ensureField(frame) {
-  if (state.fieldCache.has(frame)) return state.fieldCache.get(frame);
+  if (state.fieldCache.has(frame)) {
+    const arr = state.fieldCache.get(frame);
+    // Map preserves insertion order: delete + re-set moves this entry to the
+    // most-recently-used end.
+    state.fieldCache.delete(frame);
+    state.fieldCache.set(frame, arr);
+    return arr;
+  }
   const buf = await (await fetch(`/api/field?frame=${frame}`)).arrayBuffer();
   const arr = new Float32Array(buf);
   state.fieldCache.set(frame, arr);
+  if (state.fieldCache.size > FIELD_CACHE_LIMIT) {
+    state.fieldCache.delete(state.fieldCache.keys().next().value);
+  }
   return arr;
 }
 
