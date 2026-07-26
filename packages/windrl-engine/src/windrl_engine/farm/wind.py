@@ -2,7 +2,7 @@ from typing import Final, NamedTuple
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Key
+from jaxtyping import Array, Float, PRNGKeyArray
 
 # Matches WFCRL's default wind bounds. The sampler's support must stay equal to
 # the env observation space's freewind box, which reads these same constants.
@@ -23,7 +23,7 @@ class WindRose(NamedTuple):
     ]  # need not be normalized; consumers renormalize
 
 
-def sample_wind(key: Key[Array, ""]) -> WindCondition:
+def sample_wind(key: PRNGKeyArray) -> WindCondition:
     """Reset-time wind draw: 8·Weibull(8) speed, Normal(270, 20) direction."""
     speed_key, direction_key = jax.random.split(key)
     u = jax.random.uniform(speed_key, ())

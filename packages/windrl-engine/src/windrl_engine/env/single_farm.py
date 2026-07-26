@@ -5,7 +5,7 @@ from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Key
+from jaxtyping import Array, Bool, Float, PRNGKeyArray
 
 from windrl_engine.env.actions import YAW_LIMIT, ControlMode, Fidelity, apply_action
 from windrl_engine.env.reward import RewardFn
@@ -75,7 +75,7 @@ def _observation(
 
 def reset(
     layout: FarmLayout,
-    key: Key[Array, ""],
+    key: PRNGKeyArray,
     wind: WindCondition | None = None,
     *,
     fidelity: Fidelity = "floris",

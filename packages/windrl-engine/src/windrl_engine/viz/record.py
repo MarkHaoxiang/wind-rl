@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
-from jaxtyping import Array, Float, Key
+from jaxtyping import Array, Float, PRNGKeyArray
 
 from windrl_engine.env.actions import YAW_LIMIT
 from windrl_engine.env.batched import BatchedWindFarmEnv
@@ -17,7 +17,7 @@ from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import Fidelity, solve_farm
 
-RecordActor = Callable[[Key[Array, ""], Observation], Float[Array, "envs turbines"]]
+RecordActor = Callable[[PRNGKeyArray, Observation], Float[Array, "envs turbines"]]
 
 
 class EpisodeRecord(NamedTuple):
@@ -66,7 +66,7 @@ def _reset_frame_powers(
 
 def record_episode(
     env: BatchedWindFarmEnv,
-    key: Key[Array, ""],
+    key: PRNGKeyArray,
     n_steps: int,
     actor: RecordActor | None = None,
     *,
@@ -144,7 +144,7 @@ def sweeping_actor(yaw_step: float) -> RecordActor:
     wake field deflects and per-turbine power shifts over the opening frames.
     """
 
-    def actor(key: Key[Array, ""], obs: Observation) -> Float[Array, "envs turbines"]:
+    def actor(key: PRNGKeyArray, obs: Observation) -> Float[Array, "envs turbines"]:
         del key
         n_turbines = obs.yaw.shape[-1]
         target = jnp.linspace(-0.75, 0.75, n_turbines) * YAW_LIMIT

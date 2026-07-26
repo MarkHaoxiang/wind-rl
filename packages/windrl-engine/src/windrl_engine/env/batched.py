@@ -10,7 +10,7 @@ from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Key
+from jaxtyping import Array, Bool, Float, Key, PRNGKeyArray
 
 from windrl_engine.env.actions import YAW_LIMIT, Fidelity
 from windrl_engine.env.config import WindFarmEnvConfig
@@ -28,7 +28,7 @@ from windrl_engine.farm.state import FarmState
 from windrl_engine.farm.turbine import TurbineSpec
 from windrl_engine.farm.wind import WIND_DIRECTION_MAX, WIND_SPEED_MAX
 
-Actor = Callable[[Key[Array, ""], Observation], Float[Array, "envs turbines"]]
+Actor = Callable[[PRNGKeyArray, Observation], Float[Array, "envs turbines"]]
 
 
 class EnvState(NamedTuple):
@@ -146,7 +146,7 @@ def batched_reset(
     """Reset every env on its own key; ``layout`` carries a leading ``(envs,)`` axis."""
 
     def reset_one_farm(
-        layout: FarmLayout, key: Key[Array, ""]
+        layout: FarmLayout, key: PRNGKeyArray
     ) -> tuple[FarmState, Observation]:
         return reset(layout, key, fidelity=fidelity, turbine=turbine)
 
@@ -157,7 +157,7 @@ def batched_reset(
 def _scan_rollout(
     state: EnvState,
     obs: Observation,
-    key: Key[Array, ""],
+    key: PRNGKeyArray,
     turbine: TurbineSpec,
     params: EnvParams,
     *,
@@ -167,7 +167,7 @@ def _scan_rollout(
     idle = 1.0 if params.control_mode == "discrete" else 0.0
     default_actions = jnp.full(state.layout.x.shape, idle)
 
-    Carry = tuple[EnvState, Observation, Key[Array, ""]]
+    Carry = tuple[EnvState, Observation, PRNGKeyArray]
 
     def advance_all_envs(
         carry: Carry, _step: None
@@ -228,7 +228,7 @@ class BatchedWindFarmEnv:
         self._obs: Observation | None = None
 
     def reset_fn(
-        self, key: Key[Array, ""], layouts: FarmLayout | None = None
+        self, key: PRNGKeyArray, layouts: FarmLayout | None = None
     ) -> tuple[EnvState, Observation]:
         """Reset every env; ``layouts`` (leading ``(envs,)`` axis) gives each env
         its own layout, else the shared config layout is tiled across envs.
@@ -277,7 +277,7 @@ class BatchedWindFarmEnv:
         return layouts
 
     def reset(
-        self, key: Key[Array, ""], layouts: FarmLayout | None = None
+        self, key: PRNGKeyArray, layouts: FarmLayout | None = None
     ) -> Observation:
         """Stateful ``reset_fn``: stashes the new state and returns the observation."""
         state, obs = self.reset_fn(key, layouts)
@@ -297,7 +297,7 @@ class BatchedWindFarmEnv:
 
     def rollout(
         self,
-        key: Key[Array, ""],
+        key: PRNGKeyArray,
         n_steps: int,
         actor: Actor | None = None,
     ) -> Float[Array, "steps envs"]:

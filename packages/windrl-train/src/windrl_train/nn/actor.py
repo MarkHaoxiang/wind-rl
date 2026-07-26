@@ -1,7 +1,7 @@
 import distrax
 import equinox as eqx
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Key
+from jaxtyping import Array, Float, PRNGKeyArray
 
 from windrl_train.nn.mlp import MLP
 
@@ -22,7 +22,7 @@ class Actor(eqx.Module):
         depth: int,
         action_scale: float,
         *,
-        key: Key[Array, ""],
+        key: PRNGKeyArray,
     ) -> None:
         self.torso = MLP(feat_size, 1, width, depth, key=key)
         self.log_std = jnp.log(jnp.asarray(_INITIAL_STD))

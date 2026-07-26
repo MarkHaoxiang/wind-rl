@@ -1,7 +1,7 @@
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Key
+from jaxtyping import Array, Float, PRNGKeyArray
 
 from windrl_engine.env import BatchedWindFarmEnv, EnvState, Observation
 from windrl_train.features import agent_features
@@ -11,7 +11,7 @@ from windrl_train.nn import Actor
 def evaluate(
     env: BatchedWindFarmEnv,
     actor: Actor,
-    key: Key[Array, ""],
+    key: PRNGKeyArray,
     n_steps: int,
 ) -> dict[str, Float[Array, ""]]:
     """Deterministic-policy rollout scored by ``verdict.windowed_delta``.
@@ -26,7 +26,7 @@ def evaluate(
 def _evaluate_jit(
     env: BatchedWindFarmEnv,
     actor: Actor,
-    key: Key[Array, ""],
+    key: PRNGKeyArray,
     n_steps: int,
 ) -> Float[Array, ""]:
     state, obs = env.reset_fn(key)

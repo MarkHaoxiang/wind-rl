@@ -1,5 +1,5 @@
 import equinox as eqx
-from jaxtyping import Array, Float, Key
+from jaxtyping import Array, Float, PRNGKeyArray
 
 from windrl_train.nn.mlp import MLP
 
@@ -10,7 +10,7 @@ class Critic(eqx.Module):
     torso: MLP
 
     def __init__(
-        self, feat_size: int, width: int, depth: int, *, key: Key[Array, ""]
+        self, feat_size: int, width: int, depth: int, *, key: PRNGKeyArray
     ) -> None:
         self.torso = MLP(feat_size, 1, width, depth, key=key)
 

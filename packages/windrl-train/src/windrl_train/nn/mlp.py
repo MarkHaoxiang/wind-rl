@@ -1,7 +1,7 @@
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Key
+from jaxtyping import Array, Float, PRNGKeyArray
 
 
 class MLP(eqx.Module):
@@ -17,7 +17,7 @@ class MLP(eqx.Module):
         width: int,
         depth: int,
         *,
-        key: Key[Array, ""],
+        key: PRNGKeyArray,
     ) -> None:
         sizes = [in_size, *([width] * depth), out_size]
         keys = jax.random.split(key, len(sizes) - 1)

@@ -10,7 +10,7 @@ slice — deliberately absent here.
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Key
+from jaxtyping import Array, Float, PRNGKeyArray
 
 from windrl_engine.design.base import Designer
 from windrl_engine.design.feasibility import (
@@ -25,7 +25,7 @@ def fixed(layout: FarmLayout) -> Designer:
     coords = jnp.stack([layout.x, layout.y], axis=-1)  # (turbines, 2)
 
     def designer(
-        key: Key[Array, ""], batch_size: int
+        key: PRNGKeyArray, batch_size: int
     ) -> Float[Array, "batch turbines 2"]:
         del key  # deterministic: the layout is tiled unchanged
         return jnp.broadcast_to(coords, (batch_size, *coords.shape))
@@ -37,7 +37,7 @@ def random_uniform(
     site: SiteSpec, n_turbines: int, iters: int = DEFAULT_PROJECTION_ITERS
 ) -> Designer:
     def designer(
-        key: Key[Array, ""], batch_size: int
+        key: PRNGKeyArray, batch_size: int
     ) -> Float[Array, "batch turbines 2"]:
         maxval = jnp.stack([site.x_extent, site.y_extent])
         proposals = jax.random.uniform(

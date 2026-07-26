@@ -2,7 +2,7 @@
 
 from typing import Protocol, runtime_checkable
 
-from jaxtyping import Array, Float, Key
+from jaxtyping import Array, Float, PRNGKeyArray
 
 
 @runtime_checkable
@@ -14,5 +14,5 @@ class Designer(Protocol):
     """
 
     def __call__(
-        self, key: Key[Array, ""], batch_size: int
+        self, key: PRNGKeyArray, batch_size: int
     ) -> Float[Array, "batch turbines 2"]: ...
