@@ -1,8 +1,17 @@
+from typing import Final
+
 import jax.numpy as jnp
 
 from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
-from windrl_engine.physics.deflection import ALPHA, BETA, KA, KB
 from windrl_engine.physics.frame import QueryField, Scalar, TurbineTI, cosd
+
+# FLORIS tunes the velocity and deflection Gauss models through two independent
+# parameter sets (wake_velocity_parameters.gauss / wake_deflection_parameters.gauss);
+# they merely happen to ship the same numbers, so neither may be sourced from the other.
+ALPHA: Final = 0.58
+BETA: Final = 0.077
+KA: Final = 0.38
+KB: Final = 0.004
 
 
 def _gaussian_deficit_terms(
