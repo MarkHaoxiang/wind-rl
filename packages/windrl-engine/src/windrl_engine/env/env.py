@@ -11,12 +11,14 @@ from windrl_engine.env.spaces import Box, MultiDiscrete
 from windrl_engine.farm.layout import FarmLayout
 from windrl_engine.farm.state import FarmState, make_state
 from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
-from windrl_engine.farm.wind import WindCondition, sample_wind
+from windrl_engine.farm.wind import (
+    WIND_DIRECTION_MAX,
+    WIND_SPEED_MAX,
+    WindCondition,
+    sample_wind,
+)
 from windrl_engine.physics.power import load_proxies, local_wind, turbine_powers
 from windrl_engine.physics.solver import solve_farm
-
-WIND_SPEED_MAX: Final = 28.0  # m/s, matches WFCRL's default wind-speed bound
-WIND_DIRECTION_MAX: Final = 360.0  # deg, matches WFCRL's default wind-direction bound
 
 #: A ``FarmLayout`` pytree whose every leaf carries a leading ``(envs,)`` axis.
 #: vmap consumes and produces the single-farm class, so the batched form cannot

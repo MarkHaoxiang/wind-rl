@@ -1,8 +1,13 @@
-from typing import NamedTuple
+from typing import Final, NamedTuple
 
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Key
+
+# Matches WFCRL's default wind bounds. The sampler's support must stay equal to
+# the env observation space's freewind box, which reads these same constants.
+WIND_SPEED_MAX: Final = 28.0  # m/s
+WIND_DIRECTION_MAX: Final = 360.0  # deg
 
 
 class WindCondition(NamedTuple):
@@ -22,9 +27,11 @@ def sample_wind(key: Key[Array, ""]) -> WindCondition:
     """Reset-time wind draw: 8·Weibull(8) speed, Normal(270, 20) direction."""
     speed_key, direction_key = jax.random.split(key)
     u = jax.random.uniform(speed_key, ())
-    speed = jnp.clip(8.0 * (-jnp.log(u)) ** (1.0 / 8.0), 0.0, 28.0)
+    speed = jnp.clip(8.0 * (-jnp.log(u)) ** (1.0 / 8.0), 0.0, WIND_SPEED_MAX)
     direction = jnp.clip(
-        (jax.random.normal(direction_key, ()) * 20.0 + 270.0) % 360.0, 0.0, 360.0
+        (jax.random.normal(direction_key, ()) * 20.0 + 270.0) % WIND_DIRECTION_MAX,
+        0.0,
+        WIND_DIRECTION_MAX,
     )
     return WindCondition(speed=speed, direction=direction)
 
