@@ -8,6 +8,7 @@ from windrl_engine.physics.deflection import EPS_GAIN, NUM_EPS
 from windrl_engine.physics.flow import SHEAR
 from windrl_engine.physics.frame import RotorField, Scalar, cosd, sind
 
+# calculate_transverse_velocity's mixing-length constant, floris 4.6.6; no yaml key.
 KAPPA: Final = 0.41
 TWO_PI: Final = 2 * math.pi
 

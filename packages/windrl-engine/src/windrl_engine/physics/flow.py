@@ -4,6 +4,8 @@ from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
 from windrl_engine.physics.frame import QueryField, Scalar
 
 SHEAR: Final = 0.12
+# A scenario input, not a model parameter: FLORIS takes turbulence_intensities per
+# run, so this is our choice of operating point rather than an upstream default.
 AMBIENT_TI: Final = 0.06
 AIR_DENSITY: Final = 1.225
 

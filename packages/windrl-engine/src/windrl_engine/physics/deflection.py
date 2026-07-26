@@ -18,7 +18,10 @@ BETA: Final = 0.077
 KA: Final = 0.38
 KB: Final = 0.004
 DM: Final = 1.0
+# floris 4.6.6 hardcodes eps_gain = 0.2 in both wake_added_yaw and
+# calculate_transverse_velocity, ignoring GaussVelocityDeflection.eps_gain.
 EPS_GAIN: Final = 0.2
+# BaseModel.NUM_EPS, floris 4.6.6: divide-by-zero guard, no yaml key.
 NUM_EPS: Final = 0.001
 
 

@@ -12,6 +12,8 @@ CRESPO_CONSTANT: Final = 0.5
 CRESPO_AI: Final = 0.8
 CRESPO_DOWNSTREAM: Final = -0.32
 
+# Literals of floris 4.6.6's sequential_solver, none exposed in default_inputs.yaml.
+# The gain is 2 there and 1 in full_flow_sequential_solver; we mirror the former.
 GCH_GAIN: Final = 2.0
 LATERAL_GATE_DIAMETERS: Final = 2.0
 DOWNSTREAM_INFLUENCE_DIAMETERS: Final = 15.0
