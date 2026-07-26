@@ -169,27 +169,12 @@ def _where_lane(
     return jnp.where(mask_broadcast, true_value, false_value)
 
 
-def _select_key(mask: Bool[Array, "envs"], true_key: Array, false_key: Array) -> Array:
-    true_key_data, false_key_data = (
-        jax.random.key_data(true_key),
-        jax.random.key_data(false_key),
-    )
-    mask_broadcast = mask.reshape((mask.shape[0],) + (1,) * (true_key_data.ndim - 1))
-    return cast(
-        Array,
-        jax.random.wrap_key_data(
-            jnp.where(mask_broadcast, true_key_data, false_key_data)
-        ),
-    )
-
-
 def _tree_where_lane[T](mask: Bool[Array, "envs"], true_tree: T, false_tree: T) -> T:
-    def select_leaf(true_leaf: Array, false_leaf: Array) -> Array:
-        if jnp.issubdtype(true_leaf.dtype, jax.dtypes.prng_key):
-            return _select_key(mask, true_leaf, false_leaf)
-        return _where_lane(mask, true_leaf, false_leaf)
-
-    return cast(T, jax.tree.map(select_leaf, true_tree, false_tree))
+    # jnp.where handles typed PRNG key leaves natively, so no per-dtype branch.
+    return cast(
+        T,
+        jax.tree.map(lambda a, b: _where_lane(mask, a, b), true_tree, false_tree),
+    )
 
 
 class _StepOut(NamedTuple):
