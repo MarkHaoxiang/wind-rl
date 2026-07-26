@@ -1,7 +1,8 @@
 """On-demand hub-height wake fields for a recorded episode, cached per frame."""
 
 import functools
-from typing import cast
+from collections.abc import Callable
+from typing import Final, cast
 
 import jax
 import jax.numpy as jnp
@@ -14,6 +15,10 @@ from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.solver import Fidelity
 from windrl_engine.viz.plane import Extent, horizontal_slice, padded_extent
 from windrl_engine.viz.record import EpisodeRecord
+
+DEFAULT_RESOLUTION: Final = (240, 240)
+# ~230 kB/frame at DEFAULT_RESOLUTION: enough for a scrub window, not a whole episode.
+CACHED_FRAMES: Final = 64
 
 
 @functools.partial(
@@ -42,7 +47,7 @@ def _hub_field(
 
 
 class EpisodeFields:
-    """Lazily solves and caches the z=hub-height u-field for each recorded frame.
+    """Lazily solves the z=hub-height u-field for each recorded frame, most recent cached.
 
     The domain extent is layout-only, so it is fixed across the episode; per
     frame only the wind and yaw change. ``field_at`` returns row-major float32
@@ -53,7 +58,7 @@ class EpisodeFields:
         self,
         record: EpisodeRecord,
         *,
-        resolution: tuple[int, int] = (240, 240),
+        resolution: tuple[int, int] = DEFAULT_RESOLUTION,
         height: float | None = None,
     ) -> None:
         self._layout = FarmLayout(
@@ -65,8 +70,10 @@ class EpisodeFields:
         self._resolution = resolution
         self._height = record.hub_height if height is None else height
         self._fidelity = record.fidelity
-        self._cache: dict[int, npt.NDArray[np.float32]] = {}
         self.extent: Extent = padded_extent(self._layout, record.rotor_diameter)
+        self._cached_field: Callable[[int], npt.NDArray[np.float32]] = (
+            functools.lru_cache(maxsize=CACHED_FRAMES)(self._render)
+        )
 
     @property
     def n_frames(self) -> int:
@@ -92,10 +99,8 @@ class EpisodeFields:
             ),
         )
 
+    def _render(self, frame: int) -> npt.NDArray[np.float32]:
+        return np.asarray(self._solve(frame), dtype=np.float32)
+
     def field_at(self, frame: int) -> npt.NDArray[np.float32]:
-        cached = self._cache.get(frame)
-        if cached is not None:
-            return cached
-        result = np.asarray(self._solve(frame), dtype=np.float32)
-        self._cache[frame] = result
-        return result
+        return self._cached_field(frame)

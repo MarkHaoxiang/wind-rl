@@ -14,7 +14,7 @@ from windrl_engine.env.env import BatchedWindFarmEnv
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import solve_farm
-from windrl_engine.viz.field import EpisodeFields
+from windrl_engine.viz.field import CACHED_FRAMES, EpisodeFields
 from windrl_engine.viz.record import (
     EpisodeRecord,
     load_record,
@@ -122,6 +122,17 @@ def test_field_cache_returns_the_identical_array() -> None:
     assert fields.field_at(1) is fields.field_at(1)
 
 
+def test_field_cache_evicts_the_least_recent_frame_once_full() -> None:
+    # A long scrub must not pin every frame it passed: at ~230 kB each, an
+    # unbounded cache retains the whole episode.
+    fields = EpisodeFields(_record(n_steps=CACHED_FRAMES + 2), resolution=(8, 8))
+    first = fields.field_at(0)
+    for frame in range(1, CACHED_FRAMES + 1):
+        fields.field_at(frame)
+    assert fields.field_at(0) is not first
+    assert fields.field_at(CACHED_FRAMES) is fields.field_at(CACHED_FRAMES)
+
+
 def test_meta_payload_omits_fields_unused_by_the_viewer() -> None:
     record = _record()
     fields = EpisodeFields(record, resolution=(32, 32))
@@ -169,8 +180,7 @@ def test_field_bytes_decode_to_the_field_shape() -> None:
 
 def test_live_server_serves_page_meta_and_field_frames() -> None:
     record = _record()
-    server = serve(record, port=0)
-    server.fields = EpisodeFields(record, resolution=(32, 32))
+    server = serve(record, port=0, resolution=(32, 32))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

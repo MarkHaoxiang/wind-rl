@@ -1,8 +1,8 @@
 """Local replay server: stdlib HTTP, on-demand fields, one self-contained page.
 
-``python -m windrl_engine.viz path/to/episode.npz [--port N]`` loads a recorded
-episode, serves its stats as JSON and its per-frame wake fields as raw float32
-bytes, and prints a URL for the bundled canvas viewer.
+``python -m windrl_engine.viz path/to/episode.npz [--port N] [--resolution N]``
+loads a recorded episode, serves its stats as JSON and its per-frame wake fields
+as raw float32 bytes, and prints a URL for the bundled canvas viewer.
 """
 
 import argparse
@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 
-from windrl_engine.viz.field import EpisodeFields
+from windrl_engine.viz.field import DEFAULT_RESOLUTION, EpisodeFields
 from windrl_engine.viz.record import EpisodeRecord, load_record
 
 
@@ -104,9 +104,13 @@ def _query_frame(query: str) -> int:
 
 
 def serve(
-    record: EpisodeRecord, *, host: str = "127.0.0.1", port: int = 8000
+    record: EpisodeRecord,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    resolution: tuple[int, int] = DEFAULT_RESOLUTION,
 ) -> ReplayServer:
-    fields = EpisodeFields(record)
+    fields = EpisodeFields(record, resolution=resolution)
     return ReplayServer((host, port), record, fields)
 
 
@@ -115,10 +119,21 @@ def main() -> None:
     parser.add_argument("episode", help="path to an EpisodeRecord .npz")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--resolution",
+        type=int,
+        default=DEFAULT_RESOLUTION[0],
+        help="wake-field grid points per side",
+    )
     args = parser.parse_args()
 
     record = load_record(args.episode)
-    server = serve(record, host=args.host, port=args.port)
+    server = serve(
+        record,
+        host=args.host,
+        port=args.port,
+        resolution=(args.resolution, args.resolution),
+    )
     host, port = server.server_address[0], server.server_address[1]
     host_str = host.decode() if isinstance(host, bytes) else host
     print(f"episode replay: http://{host_str}:{port}/  ({record.yaw.shape[0]} frames)")
