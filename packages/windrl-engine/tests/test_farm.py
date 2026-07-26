@@ -68,10 +68,21 @@ def test_row_layout_spacing_is_the_wfcrl_nominal_four_diameters() -> None:
     assert jnp.allclose(layout.y, 0.0).item()
 
 
-def test_horns_rev2_has_91_turbines() -> None:
+def test_horns_rev2_is_thirteen_fanned_rows_of_seven() -> None:
     layout = horns_rev2()
     assert layout.x.shape == (91,)
-    assert layout.y.shape == (91,)
+    x = np.asarray(layout.x).reshape(13, 7)
+    y = np.asarray(layout.y).reshape(13, 7)
+
+    in_row = np.hypot(np.diff(x, axis=1), np.diff(y, axis=1))
+    assert np.all((in_row > 520.0) & (in_row < 560.0))
+
+    # The rows fan out downwind, so row-to-row spacing grows monotonically from
+    # the leading column to the trailing one (692 m -> 903 m on average).
+    row_gap = np.hypot(np.diff(x, axis=0), np.diff(y, axis=0)).mean(axis=0)
+    assert np.all(np.diff(row_gap) > 0.0)
+    assert row_gap[0] == pytest.approx(692.0, abs=1.0)
+    assert row_gap[-1] == pytest.approx(903.0, abs=1.0)
 
 
 # --- nrel_5MW v4 tables: floris yaml <-> turbine.py consistency --------------

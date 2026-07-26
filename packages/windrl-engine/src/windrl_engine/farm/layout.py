@@ -1,3 +1,7 @@
+"""Turbine layouts: the two WFCRL reference sites and Horns Rev 2."""
+
+"""Turbine layouts: the two WFCRL reference sites and Horns Rev 2."""
+
 from typing import Final, NamedTuple
 
 import jax.numpy as jnp
@@ -24,6 +28,7 @@ def row_layout(num_turbines: int, spacing: float = ROW_SPACING) -> FarmLayout:
 
 
 def turb3_row1() -> FarmLayout:
+    """WFCRL's Turb3_Row1: three turbines aligned along +x at 0/504/1008 m."""
     return FarmLayout(
         x=jnp.asarray([0.0, 504.0, 1008.0]),
         y=jnp.asarray([0.0, 0.0, 0.0]),
@@ -31,6 +36,7 @@ def turb3_row1() -> FarmLayout:
 
 
 def ablaincourt() -> FarmLayout:
+    """WFCRL's Ablaincourt site: seven turbines, metres from the site origin."""
     return FarmLayout(
         x=jnp.asarray([484.8, 797.1, 1038.8, 1377.6, 1716.9, 2057.3, 2400.0]),
         y=jnp.asarray([274.0, 251.0, 66.9, -22.7, -112.5, -195.3, -259.0]),
@@ -38,6 +44,12 @@ def ablaincourt() -> FarmLayout:
 
 
 def horns_rev2() -> FarmLayout:
+    """Horns Rev 2: 91 turbines in 13 fanned rows of 7, metres from the site origin.
+
+    Coordinates were digitized from georeferenced imagery onto a ~3.21 m raster
+    lattice, so each position is good to roughly +/-1.6 m; the y value repeated at
+    indices 61 and 65 is a lattice coincidence, not a duplicated turbine.
+    """
     x = jnp.asarray(
         [
             3586.690071,
