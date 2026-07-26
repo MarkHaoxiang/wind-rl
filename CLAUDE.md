@@ -65,11 +65,13 @@ ruff/format/mypy/pytest.
 FLORIS 4.6.6 is a pinned runtime dependency of windrl-engine, so the reference
 is computed live in-process — there are no committed goldens and no isolated
 generator scripts. The turbine tables are read from FLORIS's packaged
-`nrel_5MW.yaml` at import (`farm/floris_tables.py`, kept out of the beartype
-import hook), and `test_reference_solver.py` runs FLORIS through its `"defaults"`
+`nrel_5MW.yaml` at import (`farm/turbine.py`, without importing floris itself),
+and `test_reference_solver.py` runs FLORIS through its `"defaults"`
 GCH config once per session (module fixture, CPU) and asserts the JAX solve
-against it at rtol 1e-9. `test_farm.py` asserts `turbine.py` matches that same
-packaged YAML, so upstream drift is caught without a frozen file. Env semantics
+against it at rtol 1e-12 for u/turbulence-intensity/power and a looser rtol
+1e-9 (+atol) for the near-zero v/w transverse components. `test_farm.py`
+asserts `turbine.py` matches that same packaged YAML, so upstream drift is
+caught without a frozen file. Env semantics
 (invariants, duty-cycle, truncation) are checked by golden-free tests
 (`test_invariants.py`, `test_env_pipeline.py`).
 
