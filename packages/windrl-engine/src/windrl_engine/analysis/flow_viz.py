@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from windrl_engine.farm.layout import FarmLayout
-from windrl_engine.farm.turbine import D
+from windrl_engine.farm.turbine import DEFAULT_TURBINE
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.deficit import deficit_field
 from windrl_engine.physics.deflection import deflection_field, wake_added_yaw
@@ -103,7 +103,7 @@ def _u_on_plane(
 
 
 def _padded_bounds(low: Array, high: Array) -> tuple[float, float]:
-    pad = PAD_DIAMETERS * D
+    pad = PAD_DIAMETERS * DEFAULT_TURBINE.rotor_diameter
     return float(low) - pad, float(high) + pad
 
 

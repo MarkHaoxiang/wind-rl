@@ -11,7 +11,6 @@ from jaxtyping import Array, Float
 
 from windrl_engine.analysis.flow_viz import PAD_DIAMETERS, Extent, horizontal_slice
 from windrl_engine.farm.layout import FarmLayout
-from windrl_engine.farm.turbine import D
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.viz.record import EpisodeRecord
 
@@ -33,9 +32,11 @@ def _hub_field(
 
 
 def _padded_extent(
-    layout_x: npt.NDArray[np.float32], layout_y: npt.NDArray[np.float32]
+    layout_x: npt.NDArray[np.float32],
+    layout_y: npt.NDArray[np.float32],
+    rotor_diameter: float,
 ) -> Extent:
-    pad = PAD_DIAMETERS * D
+    pad = PAD_DIAMETERS * rotor_diameter
     return (
         float(layout_x.min()) - pad,
         float(layout_x.max()) + pad,
@@ -68,7 +69,9 @@ class EpisodeFields:
         self._resolution = resolution
         self._height = record.hub_height if height is None else height
         self._cache: dict[int, npt.NDArray[np.float32]] = {}
-        self.extent: Extent = _padded_extent(record.layout_x, record.layout_y)
+        self.extent: Extent = _padded_extent(
+            record.layout_x, record.layout_y, record.rotor_diameter
+        )
 
     @property
     def n_frames(self) -> int:

@@ -5,19 +5,20 @@ import jax.numpy as jnp
 
 from windrl_engine.env.env import reset, step, wfcrl_reward
 from windrl_engine.farm.layout import FarmLayout, row_layout
-from windrl_engine.farm.turbine import DEFAULT_TURBINE, HUB_HEIGHT
+from windrl_engine.farm.turbine import DEFAULT_TURBINE
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import solve_farm
 
 # Rotor grid z-offsets: disc_grid = linspace(-D/4, D/4, 3) for the solver's
 # turbine, centered on hub height (not tower base) -- z_grid = HH + disc.
-_GRID_Z = HUB_HEIGHT + jnp.asarray([-0.25, 0.0, 0.25]) * DEFAULT_TURBINE.rotor_diameter
+_HUB_HEIGHT = DEFAULT_TURBINE.hub_height
+_GRID_Z = _HUB_HEIGHT + jnp.asarray([-0.25, 0.0, 0.25]) * DEFAULT_TURBINE.rotor_diameter
 RATED_POWER_W = 5.1e6
 
 
 def _shear_ceiling(speed: jax.Array) -> jax.Array:
-    return speed * (_GRID_Z / HUB_HEIGHT) ** 0.12
+    return speed * (_GRID_Z / _HUB_HEIGHT) ** 0.12
 
 
 def test_solve_farm_is_equivariant_to_turbine_permutation() -> None:

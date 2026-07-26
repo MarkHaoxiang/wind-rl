@@ -9,7 +9,7 @@ from windrl_engine.analysis.flow_viz import (
 )
 from windrl_engine.analysis.metrics import HOURS_PER_YEAR, aep, power_surface, wake_loss
 from windrl_engine.farm.layout import FarmLayout, row_layout
-from windrl_engine.farm.turbine import D
+from windrl_engine.farm.turbine import DEFAULT_TURBINE
 from windrl_engine.farm.wind import WindCondition, WindRose, make_wind_rose
 
 
@@ -153,7 +153,7 @@ def test_horizontal_slice_default_bounds_pad_the_layout_extent_by_pad_diameters(
 ):
     layout = row_layout(2)  # x in [0, 504], y in [0, 0]
     wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
-    pad = PAD_DIAMETERS * D
+    pad = PAD_DIAMETERS * DEFAULT_TURBINE.rotor_diameter
 
     _, extent = horizontal_slice(layout, wind, jnp.zeros(2), resolution=(3, 3))
     assert extent == (0.0 - pad, 504.0 + pad, 0.0 - pad, 0.0 + pad)
@@ -167,7 +167,7 @@ def test_vertical_slice_default_bounds_pad_the_wind_aligned_x_extent_with_a_fixe
 ):
     layout = row_layout(2)
     wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
-    pad = PAD_DIAMETERS * D
+    pad = PAD_DIAMETERS * DEFAULT_TURBINE.rotor_diameter
 
     _, extent = vertical_slice(layout, wind, jnp.zeros(2), resolution=(3, 3))
     assert extent == (0.0 - pad, 504.0 + pad, 1.0, 270.0)

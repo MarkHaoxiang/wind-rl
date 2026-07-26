@@ -10,14 +10,8 @@ import numpy as np
 import pytest
 import yaml  # type: ignore[import-untyped]
 
-from windrl_engine.farm.layout import horns_rev2, row_layout
-from windrl_engine.farm.turbine import (
-    POWER_SCALE,
-    D,
-    ct_lookup,
-    nrel5mw_v4,
-    power_lookup,
-)
+from windrl_engine.farm.layout import ROW_SPACING, horns_rev2, row_layout
+from windrl_engine.farm.turbine import POWER_SCALE, ct_lookup, nrel5mw_v4, power_lookup
 from windrl_engine.farm.wind import sample_wind
 
 N_WIND_SAMPLES = 20_000
@@ -67,10 +61,10 @@ def test_sample_wind_direction_matches_normal_270_20_moments() -> None:
     assert sample_std == pytest.approx(20.0, rel=0.05)
 
 
-def test_row_layout_spacing_is_4_rotor_diameters() -> None:
+def test_row_layout_spacing_is_the_wfcrl_nominal_four_diameters() -> None:
     layout = row_layout(5)
     diffs = jnp.diff(layout.x)
-    assert jnp.allclose(diffs, 4 * D).item()
+    assert jnp.allclose(diffs, ROW_SPACING).item()
     assert jnp.allclose(layout.y, 0.0).item()
 
 

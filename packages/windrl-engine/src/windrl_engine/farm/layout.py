@@ -1,9 +1,13 @@
-from typing import NamedTuple
+from typing import Final, NamedTuple
 
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from windrl_engine.farm.turbine import D
+# WFCRL spaces its synthetic rows at 4 nominal rotor diameters (4 x 126 m), which
+# is where turb3_row1's 0/504/1008 m comes from. The live FLORIS rotor is 125.88 m,
+# but re-spacing to 503.52 m costs rotation invariance under fidelity="floris"
+# (a ULP-sensitive wake gate), so the nominal spacing stays.
+ROW_SPACING: Final = 504.0
 
 
 class FarmLayout(NamedTuple):
@@ -13,7 +17,7 @@ class FarmLayout(NamedTuple):
     y: Float[Array, "turbines"]
 
 
-def row_layout(num_turbines: int, spacing: float = 4 * D) -> FarmLayout:
+def row_layout(num_turbines: int, spacing: float = ROW_SPACING) -> FarmLayout:
     """Single downstream row of `num_turbines` turbines along +x, uniform `spacing` (m)."""
     x = jnp.arange(num_turbines) * spacing
     return FarmLayout(x=x, y=jnp.zeros_like(x))

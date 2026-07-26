@@ -10,9 +10,6 @@ import numpy.typing as npt
 import yaml  # type: ignore[import-untyped]
 from jaxtyping import Array, Float
 
-D: Final = 126.0  # nominal NREL-5MW rotor diameter for synthetic row-layout spacing
-HUB_HEIGHT: Final = 90.0  # nominal NREL-5MW hub height for synthetic query grids
-
 TABLE_SIZE: Final = 54
 
 # FLORIS cosine-loss operation-model constants: code, not turbine data.

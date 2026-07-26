@@ -6,7 +6,6 @@ from windrl_engine.farm.layout import (
     turb3_row1,
 )
 from windrl_engine.farm.state import FarmState, make_state
-from windrl_engine.farm.turbine import HUB_HEIGHT, D
 from windrl_engine.farm.wind import (
     WindCondition,
     WindRose,
@@ -15,8 +14,6 @@ from windrl_engine.farm.wind import (
 )
 
 __all__ = [
-    "HUB_HEIGHT",
-    "D",
     "FarmLayout",
     "FarmState",
     "WindCondition",
