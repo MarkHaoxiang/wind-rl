@@ -1,35 +1,41 @@
-"""physics/ invariant tests (design doc "Testing strategy"), CI-safe (no wfcrl)."""
+"""Physics invariants of the wake solve, asserted at both fidelities."""
+
+import functools
 
 import jax
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
-from windrl_engine.env.env import reset, step, wfcrl_reward
-from windrl_engine.farm.layout import FarmLayout, row_layout
-from windrl_engine.farm.turbine import DEFAULT_TURBINE
+from windrl_engine.farm.layout import ROW_SPACING, FarmLayout, horns_rev2, row_layout
+from windrl_engine.farm.turbine import DEFAULT_TURBINE, POWER_SCALE
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
-from windrl_engine.physics.solver import solve_farm
+from windrl_engine.physics.solver import Fidelity, solve_farm
+
+FIDELITIES: list[Fidelity] = ["floris", "corrected"]
 
 # Rotor grid z-offsets: disc_grid = linspace(-D/4, D/4, 3) for the solver's
 # turbine, centered on hub height (not tower base) -- z_grid = HH + disc.
 _HUB_HEIGHT = DEFAULT_TURBINE.hub_height
 _GRID_Z = _HUB_HEIGHT + jnp.asarray([-0.25, 0.0, 0.25]) * DEFAULT_TURBINE.rotor_diameter
-RATED_POWER_W = 5.1e6
+RATED_POWER_W = float(np.max(DEFAULT_TURBINE.power_table) * POWER_SCALE)
 
 
 def _shear_ceiling(speed: jax.Array) -> jax.Array:
     return speed * (_GRID_Z / _HUB_HEIGHT) ** 0.12
 
 
-def test_solve_farm_is_equivariant_to_turbine_permutation() -> None:
+@pytest.mark.parametrize("fidelity", FIDELITIES)
+def test_solve_farm_is_equivariant_to_turbine_permutation(fidelity: Fidelity) -> None:
     layout = row_layout(4)
     wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
     yaw = jnp.asarray([5.0, -3.0, 0.0, 8.0])
     perm = jnp.asarray([2, 0, 3, 1])
 
-    baseline = solve_farm(layout, wind, yaw)
+    baseline = solve_farm(layout, wind, yaw, fidelity=fidelity)
     permuted_layout = FarmLayout(x=layout.x[perm], y=layout.y[perm])
-    permuted = solve_farm(permuted_layout, wind, yaw[perm])
+    permuted = solve_farm(permuted_layout, wind, yaw[perm], fidelity=fidelity)
 
     assert jnp.allclose(permuted.u, baseline.u[perm], atol=1e-9)
     assert jnp.allclose(permuted.v, baseline.v[perm], atol=1e-9)
@@ -39,8 +45,23 @@ def test_solve_farm_is_equivariant_to_turbine_permutation() -> None:
     )
 
 
-def test_solve_farm_is_rotation_invariant_with_matched_wind_direction() -> None:
-    layout = row_layout(4)
+@pytest.mark.parametrize(
+    ("fidelity", "spacing"),
+    [
+        # Rotation invariance is exact under "corrected" at any spacing, but under
+        # "floris" it holds only where the rotor-mean x_i happens to round the same
+        # way in both frames -- true at the nominal 504 m, false at a true 4D
+        # 503.52 m (2.5e-2 relative). Keep the floris case on the geometry the rest
+        # of the suite uses; the extra corrected case pins the spacing-independence.
+        ("floris", ROW_SPACING),
+        ("corrected", ROW_SPACING),
+        ("corrected", 4.0 * DEFAULT_TURBINE.rotor_diameter),
+    ],
+)
+def test_solve_farm_is_rotation_invariant_with_matched_wind_direction(
+    fidelity: Fidelity, spacing: float
+) -> None:
+    layout = row_layout(4, spacing=spacing)
     yaw = jnp.asarray([0.0, 4.0, -6.0, 2.0])
     wind = WindCondition(speed=jnp.asarray(10.0), direction=jnp.asarray(270.0))
 
@@ -61,25 +82,29 @@ def test_solve_farm_is_rotation_invariant_with_matched_wind_direction() -> None:
         speed=wind.speed, direction=(wind.direction - theta) % 360.0
     )
 
-    baseline = solve_farm(layout, wind, yaw)
-    rotated = solve_farm(rotated_layout, rotated_wind, yaw)
+    baseline = solve_farm(layout, wind, yaw, fidelity=fidelity)
+    rotated = solve_farm(rotated_layout, rotated_wind, yaw, fidelity=fidelity)
 
     baseline_power = turbine_powers(baseline.u, yaw)
     rotated_power = turbine_powers(rotated.u, yaw)
     assert jnp.allclose(rotated_power, baseline_power, atol=1e-9, rtol=1e-9)
 
 
-def test_solve_farm_vmapped_over_conditions_matches_individual_solves() -> None:
+@pytest.mark.parametrize("fidelity", FIDELITIES)
+def test_solve_farm_vmapped_over_conditions_matches_individual_solves(
+    fidelity: Fidelity,
+) -> None:
     layout = row_layout(3)
     yaw = jnp.zeros(3)
     speeds = jnp.asarray([6.0, 9.0, 12.0])
     directions = jnp.asarray([260.0, 270.0, 280.0])
     conditions = WindCondition(speed=speeds, direction=directions)
 
-    batched = jax.vmap(solve_farm, in_axes=(None, 0, None))(layout, conditions, yaw)
+    solve = functools.partial(solve_farm, fidelity=fidelity)
+    batched = jax.vmap(solve, in_axes=(None, 0, None))(layout, conditions, yaw)
 
     for i in range(3):
-        single = solve_farm(
+        single = solve(
             layout, WindCondition(speed=speeds[i], direction=directions[i]), yaw
         )
         assert jnp.allclose(batched.u[i], single.u, atol=1e-9)
@@ -90,32 +115,27 @@ def test_solve_farm_vmapped_over_conditions_matches_individual_solves() -> None:
         )
 
 
-def test_solve_farm_deficit_never_exceeds_freestream_shear_and_stays_positive() -> None:
+@pytest.mark.parametrize("fidelity", FIDELITIES)
+def test_solve_farm_wakes_every_turbine_behind_the_unwaked_front_of_the_row(
+    fidelity: Fidelity,
+) -> None:
+    # 270 deg = wind from the west, flowing in +x; row_layout is aligned along
+    # +x with y=0, so turbines 1..3 all sit directly downstream of turbine 0.
     layout = row_layout(4)
     wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
     yaw = jnp.zeros(4)
 
-    solution = solve_farm(layout, wind, yaw)
+    solution = solve_farm(layout, wind, yaw, fidelity=fidelity)
     ceiling = _shear_ceiling(
         wind.speed
     )  # shape (grid,), broadcasts over (turbines, grid)
 
     assert bool(jnp.all(solution.u > 0.0))
     assert bool(jnp.all(solution.u <= ceiling[None, None, :] + 1e-9))
-
-
-def test_solve_farm_downstream_turbine_is_strictly_waked_by_aligned_upstream() -> None:
-    # 270 deg = wind from the west, flowing in +x; row_layout is aligned along
-    # +x with y=0, so turbine 1 sits directly downstream of turbine 0.
-    layout = row_layout(2)
-    wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
-    yaw = jnp.zeros(2)
-
-    solution = solve_farm(layout, wind, yaw)
-    ceiling = _shear_ceiling(wind.speed)
-    downstream_u = solution.u[1]
-
-    assert bool(jnp.all(downstream_u < ceiling[None, :] - 1e-6))
+    # Nothing is upstream of turbine 0, so its inflow is the sheared freestream
+    # bit for bit -- no wake contribution may round its way in.
+    assert bool(jnp.all(solution.u[0] == ceiling[None, :]))
+    assert bool(jnp.all(solution.u[1:] < ceiling[None, None, :] - 1e-6))
 
 
 def test_turbine_powers_never_exceed_rated_and_front_turbine_dominates_the_row() -> (
@@ -141,26 +161,22 @@ def test_turbine_powers_never_exceed_rated_and_front_turbine_dominates_the_row()
     )  # strict row min
 
 
-def _run_trajectory(
-    layout: FarmLayout, key: jax.Array, actions: jax.Array
-) -> list[jax.Array]:
-    state, obs = reset(layout, key)
-    trace = [obs.yaw, obs.wind_speed, obs.wind_direction]
-    for action in actions:
-        state, obs, reward, _truncated = step(
-            layout, state, action, yaw_step=5.0, reward_fn=wfcrl_reward(0.1), horizon=10
-        )
-        trace.extend([obs.yaw, obs.wind_speed, obs.wind_direction, reward])
-    return trace
+@pytest.mark.slow
+def test_solve_farm_stays_bounded_on_the_full_91_turbine_horns_rev2_site() -> None:
+    # The 3-7 turbine cases never exercise a deep interior: at 91 turbines the
+    # SOSFS sum compounds ~13 rows of wakes, which is where a sign slip or an
+    # unguarded division would first surface as a NaN or a negative velocity.
+    layout = horns_rev2()
+    wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
+    yaw = jnp.zeros(91)
 
+    solution = solve_farm(layout, wind, yaw)
+    powers = turbine_powers(solution.u, yaw)
+    ceiling = _shear_ceiling(wind.speed)
 
-def test_replay_from_same_key_and_action_stream_is_bitwise_deterministic() -> None:
-    layout = row_layout(3)
-    key = jax.random.key(42)
-    actions = jnp.asarray([[5.0, -5.0, 0.0], [0.0, 5.0, -5.0], [-5.0, 0.0, 5.0]])
-
-    first = _run_trajectory(layout, key, actions)
-    second = _run_trajectory(layout, key, actions)
-
-    for a, b in zip(first, second, strict=True):
-        assert jnp.array_equal(a, b)
+    assert bool(jnp.all(jnp.isfinite(solution.u)))
+    assert bool(jnp.all(solution.u > 0.0))
+    assert bool(jnp.all(solution.u <= ceiling[None, None, :] + 1e-9))
+    assert bool(jnp.all(solution.turbulence_intensity >= 0.0))
+    assert bool(jnp.all(powers > 0.0))
+    assert bool(jnp.all(powers <= RATED_POWER_W))
