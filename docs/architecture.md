@@ -76,6 +76,8 @@ rewritten in-repo.
 - `algo/ppo/`: IPPO scaffolding — `config.py` (`IPPOConfig`), `types.py`
   (`Transition`, `LearnerState` pytrees), `featurize.py` (`agent_features`,
   the raw `Observation` -> `NFEAT`-wide per-agent feature vector).
+- `eval/`: `evaluator.py` (`evaluate`, a jitted fresh-reset deterministic
+  rollout under `actor.mode` scoring `eval/mean_reward` for the runner to log).
 
 ## Outputs
 
