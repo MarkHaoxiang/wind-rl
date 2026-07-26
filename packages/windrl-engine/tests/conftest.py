@@ -34,6 +34,7 @@ install_import_hook(
         "windrl_engine.physics.deficit",
         "windrl_engine.physics.turbulence",
         "windrl_engine.physics.solver",
+        "windrl_engine.physics.query_field",
         "windrl_engine.physics.power",
         "windrl_engine.design.base",
         "windrl_engine.design.designers",

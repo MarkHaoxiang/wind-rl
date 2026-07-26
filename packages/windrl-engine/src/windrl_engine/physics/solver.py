@@ -7,11 +7,16 @@ from jaxtyping import Array, Float
 from windrl_engine.farm.layout import FarmLayout
 from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
 from windrl_engine.farm.wind import WindCondition
-from windrl_engine.physics.deficit import deficit_field
+from windrl_engine.physics.deficit import deficit_field, sosfs_combine
 from windrl_engine.physics.deflection import deflection_field, wake_added_yaw
 from windrl_engine.physics.flow import AMBIENT_TI, initial_flow
 from windrl_engine.physics.frame import (
+    Permutation,
+    QueryField,
     RotorField,
+    Scalar,
+    Turbines,
+    TurbineTI,
     rotate_to_wind_frame,
     rotor_grid,
     upstream_order,
@@ -49,6 +54,82 @@ def rotor_plane_x(x: Float[Array, "turbines"]) -> Float[Array, "turbines"]:
     return x + jnp.where(e1 < -4.5 * ulp, ulp, 0.0)
 
 
+class WindFrame(NamedTuple):
+    """Rotor grids and undisturbed inflow in the wind-aligned frame, sorted upstream first."""
+
+    x: RotorField
+    y: RotorField
+    z: RotorField
+    yaw: Turbines
+    u_initial: RotorField
+    dudz_initial: RotorField
+    y_i: Turbines  # rotor-plane spanwise centre of each turbine
+    freestream_velocity: Scalar
+    sorted_idx: Permutation
+    unsorted_idx: Permutation
+
+
+def wind_frame(
+    layout: FarmLayout,
+    wind: WindCondition,
+    yaw: Float[Array, "turbines"],
+    turbine: TurbineSpec,
+) -> WindFrame:
+    """Wind-frame setup shared by the farm solve and the query-point field pass."""
+    x_rot, y_rot = rotate_to_wind_frame(layout.x, layout.y, wind.direction)
+    x_grid, y_grid, z_grid = rotor_grid(x_rot, y_rot, turbine=turbine)
+    sorted_idx, unsorted_idx = upstream_order(x_rot)
+    x_sorted = x_grid[sorted_idx]
+    y_sorted = y_grid[sorted_idx]
+    z_sorted = z_grid[sorted_idx]
+    u_initial, dudz_initial = initial_flow(z_sorted, wind.speed, turbine=turbine)
+    return WindFrame(
+        x=x_sorted,
+        y=y_sorted,
+        z=z_sorted,
+        yaw=yaw[sorted_idx],
+        u_initial=u_initial,
+        dudz_initial=dudz_initial,
+        y_i=jnp.mean(y_sorted, axis=(1, 2)),
+        freestream_velocity=jnp.mean(u_initial),
+        sorted_idx=sorted_idx,
+        unsorted_idx=unsorted_idx,
+    )
+
+
+def wake_contribution(
+    x: QueryField,
+    y: QueryField,
+    z: QueryField,
+    u_initial: QueryField,
+    x_i: Scalar,
+    y_i: Scalar,
+    effective_yaw: Scalar,
+    yaw_i: Scalar,
+    ct_i: Scalar,
+    ti_deflection: TurbineTI,
+    ti_deficit: TurbineTI,
+    turbine: TurbineSpec,
+) -> QueryField:
+    """Normalized velocity deficit turbine ``i`` casts on the query points."""
+    deflection = deflection_field(
+        x, u_initial, x_i, effective_yaw, ti_deflection, ct_i, turbine=turbine
+    )
+    return deficit_field(
+        x,
+        y,
+        z,
+        u_initial,
+        deflection,
+        x_i,
+        y_i,
+        ct_i,
+        yaw_i,
+        ti_deficit,
+        turbine=turbine,
+    )
+
+
 class _Carry(NamedTuple):
     wake_field: RotorField
     v: RotorField
@@ -70,32 +151,24 @@ def solve_farm(
     reference's numerical quirks, ``"corrected"`` drops them.
     """
     corrected = fidelity == "corrected"
-    x_rot, y_rot = rotate_to_wind_frame(layout.x, layout.y, wind.direction)
-    x_grid, y_grid, z_grid = rotor_grid(x_rot, y_rot, turbine=turbine)
-    sorted_idx, unsorted_idx = upstream_order(x_rot)
-
-    x_sorted = x_grid[sorted_idx]
-    y_sorted = y_grid[sorted_idx]
-    z_sorted = z_grid[sorted_idx]
-    yaw_sorted = yaw[sorted_idx]
-    u_initial, dudz_initial = initial_flow(z_sorted, wind.speed, turbine=turbine)
+    frame = wind_frame(layout, wind, yaw, turbine)
+    x_sorted, y_sorted, z_sorted = frame.x, frame.y, frame.z
+    u_initial = frame.u_initial
 
     # corrected: x_i is exactly the turbine's own rotor-plane x (no mean-rounding
     # trick), so the strict `delta_x > 0` transverse gate excludes only its own plane.
     x_i_all = x_sorted[:, 0, 0] if corrected else rotor_plane_x(x_sorted[:, 0, 0])
-    y_i_all = jnp.mean(y_sorted, axis=(1, 2))
-    freestream_velocity = jnp.mean(u_initial)
     num_turbines = x_sorted.shape[0]
 
     def body(i: Array, carry: _Carry) -> _Carry:
         u_current = u_initial - carry.wake_field
         x_i = x_i_all[i]
-        y_i = y_i_all[i]
+        y_i = frame.y_i[i]
         u_i = u_current[i]
         v_i = carry.v[i]
         w_i = carry.w[i]
         ti_i = carry.turbulence_intensity[i]
-        yaw_i = yaw_sorted[i]
+        yaw_i = frame.yaw[i]
 
         rotor_speed = cubic_mean(u_i)
         ct_i = effective_ct(rotor_speed, yaw_i, turbine=turbine)
@@ -105,7 +178,7 @@ def solve_farm(
             v_i,
             y_sorted[i] - y_i,
             z_sorted[i],
-            freestream_velocity,
+            frame.freestream_velocity,
             rotor_speed,
             ct_i,
             a_i,
@@ -117,8 +190,8 @@ def solve_farm(
             x_sorted,
             y_sorted,
             z_sorted,
-            dudz_initial,
-            freestream_velocity,
+            frame.dudz_initial,
+            frame.freestream_velocity,
             rotor_speed,
             x_i,
             y_i,
@@ -140,29 +213,21 @@ def solve_farm(
         )
         ti_deflection = ti_after_mixing[i] if corrected else ti_i
 
-        deflection = deflection_field(
-            x_sorted,
-            u_initial,
-            x_i,
-            effective_yaw,
-            ti_deflection,
-            ct_i,
-            turbine=turbine,
-        )
-        deficit = deficit_field(
+        deficit = wake_contribution(
             x_sorted,
             y_sorted,
             z_sorted,
             u_initial,
-            deflection,
             x_i,
             y_i,
-            ct_i,
+            effective_yaw,
             yaw_i,
+            ct_i,
+            ti_deflection,
             ti_after_mixing[i],
-            turbine=turbine,
+            turbine,
         )
-        wake_field = jnp.hypot(carry.wake_field, deficit * u_initial)
+        wake_field = sosfs_combine(carry.wake_field, deficit * u_initial)
 
         wake_added_ti = crespo_hernandez(x_sorted, x_i, a_i, turbine=turbine)
         ti_after_wake = wake_added_turbulence(
@@ -190,8 +255,8 @@ def solve_farm(
     u_sorted = u_initial - final.wake_field
     ti_sorted = jnp.mean(final.turbulence_intensity, axis=(1, 2))
     return FlowSolution(
-        u=u_sorted[unsorted_idx],
-        v=final.v[unsorted_idx],
-        w=final.w[unsorted_idx],
-        turbulence_intensity=ti_sorted[unsorted_idx],
+        u=u_sorted[frame.unsorted_idx],
+        v=final.v[frame.unsorted_idx],
+        w=final.w[frame.unsorted_idx],
+        turbulence_intensity=ti_sorted[frame.unsorted_idx],
     )

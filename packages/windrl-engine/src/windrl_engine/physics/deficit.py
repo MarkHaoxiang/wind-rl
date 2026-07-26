@@ -39,6 +39,11 @@ def _gaussian_deficit_terms(
     return r_squared, 1.0 - jnp.sqrt(d)
 
 
+def sosfs_combine(wake_field: QueryField, velocity_deficit: QueryField) -> QueryField:
+    """Sum-of-squares-freestream superposition of one more deficit (m/s) onto a wake field."""
+    return jnp.hypot(wake_field, velocity_deficit)
+
+
 def deficit_field(
     x: QueryField,
     y: QueryField,
