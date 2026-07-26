@@ -8,10 +8,6 @@ windrl-train = { workspace = true }
 [dependency-groups]
 dev = [
     "beartype>=0.19",
-    # Backs windrl-engine's optional [viz] extra so strict mypy sees real
-    # matplotlib types for analysis/plots.py; runtime consumers opt in via the
-    # extra instead.
-    "matplotlib>=3.9",
     "mypy>=1.11",
     "pre-commit>=4",
     "pytest>=8",

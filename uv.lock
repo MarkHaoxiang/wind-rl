@@ -25,7 +25,6 @@ members = [
 [manifest.dependency-groups]
 dev = [
     { name = "beartype", specifier = ">=0.19" },
-    { name = "matplotlib", specifier = ">=3.9" },
     { name = "mypy", specifier = ">=1.11" },
     { name = "pre-commit", specifier = ">=4" },
     { name = "pytest", specifier = ">=8" },
@@ -1922,9 +1921,6 @@ dependencies = [
 gpu = [
     { name = "jax", extra = ["cuda12"] },
 ]
-viz = [
-    { name = "matplotlib" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -1932,11 +1928,10 @@ requires-dist = [
     { name = "jax", specifier = ">=0.5.3" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'gpu'" },
     { name = "jaxtyping", specifier = ">=0.3.10" },
-    { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.9" },
     { name = "numpy", specifier = ">=2" },
     { name = "pydantic", specifier = ">=2" },
 ]
-provides-extras = ["viz", "gpu"]
+provides-extras = ["gpu"]
 
 [[package]]
 name = "windrl-train"

@@ -15,7 +15,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-viz = ["matplotlib>=3.9"]
 # GPU (NVIDIA CUDA 12) support, opt-in only: `uv sync --extra gpu` layers the
 # `jax[cuda12]` plugin wheels on top of the CPU jax above. Left out of a default
 # `uv sync` so CI never pulls the multi-GB CUDA wheels.
