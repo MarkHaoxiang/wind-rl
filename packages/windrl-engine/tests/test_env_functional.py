@@ -76,18 +76,18 @@ def test_scan_matches_stateful() -> None:
 
 def test_reset_fn_tiles_shared_layout(env3: BatchedWindFarmEnv) -> None:
     # step_fn always vmaps the layout over axis 0, so a shared config layout has
-    # to arrive from reset_fn already tiled per lane.
+    # to arrive from reset_fn already tiled per env.
     state, _ = env3.reset_fn(jax.random.key(0))
 
     expected = (env3.config.n_envs, env3.n_turbines)
     assert expected == (3, 3)
-    for lane_leaf, shared_leaf in zip(state.layout, env3.layout, strict=True):
-        assert lane_leaf.shape == expected
-        assert jnp.array_equal(lane_leaf, jnp.broadcast_to(shared_leaf, expected))
+    for env_leaf, shared_leaf in zip(state.layout, env3.layout, strict=True):
+        assert env_leaf.shape == expected
+        assert jnp.array_equal(env_leaf, jnp.broadcast_to(shared_leaf, expected))
 
 
 def test_per_env_layouts_survive_autoreset() -> None:
-    # Auto-reset resamples wind only: the lane's layout rides in EnvState and
+    # Auto-reset resamples wind only: the env's layout rides in EnvState and
     # must come out of a scan that crosses two truncations bit-for-bit unchanged.
     config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=2, horizon=3)
     env = BatchedWindFarmEnv(config)

@@ -23,15 +23,15 @@ _LAYOUT = [(0.0, 0.0), (504.0, 0.0)]
 
 
 def _per_env_layouts() -> FarmLayout:
-    # Same turbine count as _LAYOUT so only positions differ per lane; the
-    # downstream turbine's x varies so each lane's wake solve -- and hence its
-    # local wind/power -- is genuinely lane-specific.
+    # Same turbine count as _LAYOUT so only positions differ per env; the
+    # downstream turbine's x varies so each env's wake solve -- and hence its
+    # local wind/power -- is genuinely env-specific.
     x = jnp.asarray([[0.0, 504.0], [0.0, 630.0], [0.0, 756.0]])
     y = jnp.zeros((3, 2))
     return FarmLayout(x=x, y=y)
 
 
-def _lane_layout(layouts: FarmLayout, i: int) -> FarmLayout:
+def _env_layout(layouts: FarmLayout, i: int) -> FarmLayout:
     return FarmLayout(x=layouts.x[i], y=layouts.y[i])
 
 
@@ -41,10 +41,10 @@ def test_batched_reset_matches_stacked_single_farm_reset_calls() -> None:
     key = jax.random.key(7)
 
     obs = env.reset(key)
-    lane_keys = jax.random.split(key, config.n_envs)
+    env_keys = jax.random.split(key, config.n_envs)
 
-    for i, lane_key in enumerate(lane_keys):
-        _, expected_obs = reset(env.layout, lane_key)
+    for i, env_key in enumerate(env_keys):
+        _, expected_obs = reset(env.layout, env_key)
         assert jnp.allclose(obs.yaw[i], expected_obs.yaw)
         assert jnp.allclose(obs.freewind[i], expected_obs.freewind)
         assert jnp.allclose(obs.wind_speed[i], expected_obs.wind_speed)
@@ -52,22 +52,22 @@ def test_batched_reset_matches_stacked_single_farm_reset_calls() -> None:
 
 
 def test_batched_step_matches_stacked_single_farm_step_calls() -> None:
-    # horizon is large enough that no lane truncates, so the comparison isn't
+    # horizon is large enough that no env truncates, so the comparison isn't
     # complicated by device-side auto-reset (covered separately below).
     config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=3, horizon=50)
     env = BatchedWindFarmEnv(config)
     key = jax.random.key(7)
 
     env.reset(key)
-    lane_states = [
+    farm_states = [
         reset(env.layout, k)[0] for k in jax.random.split(key, config.n_envs)
     ]
 
     actions = jnp.asarray([[3.0, -2.0], [0.0, 0.0], [5.0, -5.0]])
     obs, reward, truncated, extras = env.step(actions)
 
-    for i, lane_state in enumerate(lane_states):
-        expected = step(env.layout, lane_state, actions[i], env.params)
+    for i, farm_state in enumerate(farm_states):
+        expected = step(env.layout, farm_state, actions[i], env.params)
         assert jnp.allclose(obs.yaw[i], expected.obs.yaw, atol=1e-9)
         assert jnp.allclose(obs.freewind[i], expected.obs.freewind, atol=1e-9)
         assert jnp.allclose(reward[i], expected.reward, atol=1e-9)
@@ -139,7 +139,7 @@ def test_identically_configured_envs_reuse_one_compiled_step() -> None:
     assert _batched_step_jit._cache_size() == compiled
 
 
-def test_reset_gives_each_lane_an_independent_wind_draw() -> None:
+def test_reset_gives_each_env_an_independent_wind_draw() -> None:
     config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=4, horizon=50)
     env = BatchedWindFarmEnv(config)
     obs = env.reset(jax.random.key(21))
@@ -151,8 +151,8 @@ def test_reset_gives_each_lane_an_independent_wind_draw() -> None:
 
 def test_truncation_returns_the_reset_obs_and_keeps_the_terminal_one() -> None:
     # horizon=3 with reset's step_count=1 floor means truncation fires on the
-    # 2nd agent step; both lanes share one horizon so they truncate together
-    # (this env has no mechanism for lanes to desynchronize their step_count).
+    # 2nd agent step; both envs share one horizon so they truncate together
+    # (there is no mechanism for envs to desynchronize their step_count).
     config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=2, horizon=3)
     env = BatchedWindFarmEnv(config)
     state, _ = env.reset_fn(jax.random.key(3))
@@ -166,9 +166,9 @@ def test_truncation_returns_the_reset_obs_and_keeps_the_terminal_one() -> None:
     assert bool(jnp.all(after.truncated))
     assert jnp.array_equal(after.state.farm.step_count, jnp.asarray([1, 1]))
 
-    # Each lane redraws from the key it was carrying, not from a shared one.
-    for i, lane_key in enumerate(before.state.farm.key):
-        _, expected_obs = reset(env.layout, lane_key)
+    # Each env redraws from the key it was carrying, not from a shared one.
+    for i, env_key in enumerate(before.state.farm.key):
+        _, expected_obs = reset(env.layout, env_key)
         assert jnp.array_equal(after.obs.yaw[i], expected_obs.yaw)
         assert jnp.array_equal(after.obs.freewind[i], expected_obs.freewind)
     # The returned observation is the fresh episode's, so the terminal state --
@@ -295,22 +295,22 @@ def test_rollout_before_reset_raises() -> None:
 # --- Per-env layouts (co-design seam, contract A) -----------------------------
 
 
-def test_per_env_layouts_make_each_lane_solve_its_own_layout() -> None:
-    # Three lanes, three distinct 2-turbine layouts; each lane's first
+def test_per_env_layouts_make_each_env_solve_its_own_layout() -> None:
+    # Three envs, three distinct 2-turbine layouts; each env's first
     # observation and first-step reward must equal the single-farm functional
-    # core run on that lane's layout with that lane's own reset key -- exactly,
-    # under x64 (the batched path is jit(vmap) of the same per-lane math).
+    # core run on that env's layout with that env's own reset key -- exactly,
+    # under x64 (the batched path is jit(vmap) of the same per-env math).
     config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=3, horizon=50)
     env = BatchedWindFarmEnv(config)
     key = jax.random.key(7)
     layouts = _per_env_layouts()
 
     obs = env.reset(key, layouts)
-    lane_keys = jax.random.split(key, config.n_envs)
-    lane_states = []
-    for i, lane_key in enumerate(lane_keys):
-        lane_state, expected_obs = reset(_lane_layout(layouts, i), lane_key)
-        lane_states.append(lane_state)
+    env_keys = jax.random.split(key, config.n_envs)
+    farm_states = []
+    for i, env_key in enumerate(env_keys):
+        farm_state, expected_obs = reset(_env_layout(layouts, i), env_key)
+        farm_states.append(farm_state)
         # Raw wind draw is bitwise-identical; solve-derived fields agree to
         # solver precision (the jit(vmap) path reassociates float64 ops ~1e-8,
         # matching the sibling stacked-singles tests' allclose tolerance).
@@ -321,8 +321,8 @@ def test_per_env_layouts_make_each_lane_solve_its_own_layout() -> None:
 
     actions = jnp.asarray([[3.0, -2.0], [1.0, 0.0], [5.0, -5.0]])
     _, reward, _, _ = env.step(actions)
-    for i, lane_state in enumerate(lane_states):
-        expected = step(_lane_layout(layouts, i), lane_state, actions[i], env.params)
+    for i, farm_state in enumerate(farm_states):
+        expected = step(_env_layout(layouts, i), farm_state, actions[i], env.params)
         assert jnp.allclose(reward[i], expected.reward)
 
 
@@ -356,9 +356,9 @@ def test_layouts_none_reproduces_the_config_shared_layout_trajectory() -> None:
 
 
 def test_per_env_layout_is_fixed_across_auto_reset_while_wind_resamples() -> None:
-    # A lane's layout is FIXED across device-side auto-reset (auto-reset resamples
-    # wind/state only). Drive both lanes to truncation, then confirm the fresh
-    # observation matches the single-farm solve on the *same* per-lane layout with
+    # An env's layout is FIXED across device-side auto-reset (auto-reset resamples
+    # wind/state only). Drive both envs to truncation, then confirm the fresh
+    # observation matches the single-farm solve on the *same* per-env layout with
     # a *new* wind draw, and the stored layout is unchanged.
     config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=2, horizon=3)
     env = BatchedWindFarmEnv(config)
@@ -373,8 +373,8 @@ def test_per_env_layout_is_fixed_across_auto_reset_while_wind_resamples() -> Non
     after = env.step_fn(before.state, actions)  # 2 -> 3 == horizon
     assert bool(jnp.all(after.truncated))
 
-    for i, lane_key in enumerate(before.state.farm.key):
-        _, expected_obs = reset(_lane_layout(layouts, i), lane_key)
+    for i, env_key in enumerate(before.state.farm.key):
+        _, expected_obs = reset(_env_layout(layouts, i), env_key)
         assert jnp.array_equal(after.obs.yaw[i], expected_obs.yaw)
         assert jnp.array_equal(after.obs.freewind[i], expected_obs.freewind)
         assert jnp.allclose(after.obs.wind_speed[i], expected_obs.wind_speed)

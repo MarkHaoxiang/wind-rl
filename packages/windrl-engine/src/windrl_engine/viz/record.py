@@ -1,4 +1,4 @@
-"""Record a single env lane's rollout into a replayable ``EpisodeRecord``.
+"""Record one env of a batch into a replayable ``EpisodeRecord``.
 
 Numpy-facing (host arrays, ``.npz`` persistence), so it stays outside the
 jaxtyping/beartype import hook that guards the single-farm core.
@@ -24,7 +24,7 @@ RecordActor = Callable[[Key[Array, ""], Observation], Float[Array, "envs turbine
 
 
 class EpisodeRecord(NamedTuple):
-    """One env lane's rollout, everything a replay viewer needs, as host arrays.
+    """One env's rollout, everything a replay viewer needs, as host arrays.
 
     Frame 0 is the reset state; frame ``t`` is the state the ``t``-th action
     produced, before any auto-reset — so ``truncated[t]`` marks an episode's
@@ -75,7 +75,7 @@ def record_episode(
     *,
     env_index: int = 0,
 ) -> EpisodeRecord:
-    """Roll ``env`` for ``n_steps`` and capture lane ``env_index`` as an ``EpisodeRecord``.
+    """Roll ``env`` for ``n_steps``, capturing ``env_index`` as an ``EpisodeRecord``.
 
     ``actor`` maps ``(key, batched observation) -> (envs, turbines)`` actions;
     ``None`` holds yaw. The record has ``n_steps + 1`` frames (reset first).

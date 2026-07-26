@@ -21,11 +21,6 @@ from windrl_engine.farm.wind import (
 from windrl_engine.physics.power import load_proxies, local_wind, turbine_powers
 from windrl_engine.physics.solver import solve_farm
 
-#: A ``FarmLayout`` pytree whose every leaf carries a leading ``(envs,)`` axis.
-#: vmap consumes and produces the single-farm class, so the batched form cannot
-#: be a distinct runtime type; this alias marks the seams that expect it.
-PerEnvLayouts = FarmLayout
-
 
 class Observation(NamedTuple):
     yaw: Float[Array, "turbines"]
@@ -163,32 +158,32 @@ def step(
 Actor = Callable[[Key[Array, ""], Observation], Float[Array, "envs turbines"]]
 
 
-def _where_lane(
+def _where_env(
     mask: Bool[Array, "envs"], true_value: Array, false_value: Array
 ) -> Array:
     mask_broadcast = mask.reshape((mask.shape[0],) + (1,) * (true_value.ndim - 1))
     return jnp.where(mask_broadcast, true_value, false_value)
 
 
-def _tree_where_lane[T](mask: Bool[Array, "envs"], true_tree: T, false_tree: T) -> T:
+def _tree_where_env[T](mask: Bool[Array, "envs"], true_tree: T, false_tree: T) -> T:
     # jnp.where handles typed PRNG key leaves natively, so no per-dtype branch.
     return cast(
         T,
-        jax.tree.map(lambda a, b: _where_lane(mask, a, b), true_tree, false_tree),
+        jax.tree.map(lambda a, b: _where_env(mask, a, b), true_tree, false_tree),
     )
 
 
 class EnvState(NamedTuple):
-    """Everything ``batched_step`` needs to advance a batch of lanes, all leaves
+    """Everything ``batched_step`` needs to advance a batch of envs, all leaves
     batched over a leading ``(envs,)`` axis.
 
     ``layout`` rides in the state rather than being resampled: device-side
     auto-reset redraws wind only, so a ``lax.scan`` carrying this tuple keeps
-    each lane's layout across episode boundaries.
+    each env's layout across episode boundaries.
     """
 
     farm: FarmState
-    layout: PerEnvLayouts
+    layout: FarmLayout  # every leaf carries the leading ``(envs,)`` axis
 
 
 class StepExtras(NamedTuple):
@@ -196,7 +191,7 @@ class StepExtras(NamedTuple):
     replay viewer does."""
 
     #: The observation of the state the action actually produced. It differs
-    #: from the returned observation exactly on a truncating lane, whose
+    #: from the returned observation exactly on a truncating env, whose
     #: observation has already been replaced by its auto-reset — so this is what
     #: bootstraps V(s_T) under a time limit, and the episode's true final frame.
     terminal_obs: Observation
@@ -217,9 +212,9 @@ def batched_step(
     turbine: TurbineSpec,
     params: EnvParams,
 ) -> BatchedStepOut:
-    """Advance every lane one step, auto-resetting the lanes that hit the horizon.
+    """Advance every env one step, auto-resetting the envs that hit the horizon.
 
-    Deterministic in its arguments: a lane redraws its wind from its own key in
+    Deterministic in its arguments: an env redraws its wind from its own key in
     ``state``, and keeps the layout held there. ``params`` is jit-static.
     """
 
@@ -239,12 +234,12 @@ def batched_step(
         def reset_one_farm(
             layout: FarmLayout, farm: FarmState
         ) -> tuple[FarmState, Observation]:
-            # Each lane advances its own stream, so the draws stay independent
-            # (and shard with the lane) instead of fanning out of a host key.
+            # Each env advances its own stream, so the draws stay independent
+            # (and shard with the env) instead of fanning out of a host key.
             return reset(layout, farm.key, fidelity=params.fidelity, turbine=turbine)
 
         fresh_farm, fresh_obs = jax.vmap(reset_one_farm)(state.layout, current_farm)
-        return _tree_where_lane(
+        return _tree_where_env(
             truncated, (fresh_farm, fresh_obs), (current_farm, current_obs)
         )
 
@@ -269,13 +264,13 @@ def batched_step(
 
 
 def batched_reset(
-    layout: PerEnvLayouts,
+    layout: FarmLayout,
     keys: Key[Array, "envs"],
     turbine: TurbineSpec,
     *,
     fidelity: Fidelity,
 ) -> tuple[EnvState, Observation]:
-    """Reset every lane on its own key; ``layout`` carries a leading ``(envs,)`` axis."""
+    """Reset every env on its own key; ``layout`` carries a leading ``(envs,)`` axis."""
 
     def reset_one_farm(
         layout: FarmLayout, key: Key[Array, ""]
@@ -301,7 +296,7 @@ def _scan_rollout(
 
     Carry = tuple[EnvState, Observation, Key[Array, ""]]
 
-    def advance_all_lanes(
+    def advance_all_envs(
         carry: Carry, _step: None
     ) -> tuple[Carry, Float[Array, "envs"]]:
         state, obs, sample_key = carry
@@ -311,7 +306,7 @@ def _scan_rollout(
         return (out.state, out.obs, sample_key), out.reward
 
     (final_state, final_obs, _), rewards = jax.lax.scan(
-        advance_all_lanes, (state, obs, key), None, length=n_steps
+        advance_all_envs, (state, obs, key), None, length=n_steps
     )
     return final_state, final_obs, rewards
 
@@ -330,10 +325,10 @@ class BatchedWindFarmEnv:
 
     The turbine axis is the multi-agent axis: observations and actions are
     per-turbine with a leading ``(envs, turbines)`` shape, and the scalar
-    per-env reward is broadcast per turbine by the consumer. A lane that hits
+    per-env reward is broadcast per turbine by the consumer. An env that hits
     its horizon auto-resets on device with freshly sampled wind. ``reset``
     optionally takes per-env ``layouts`` (leading ``(envs,)`` axis), letting
-    each lane solve its own fixed layout instead of the shared default.
+    each env solve its own fixed layout instead of the shared default.
 
     ``reset_fn``/``step_fn`` bind this env's layout, turbine tables and
     :class:`EnvParams` to the pure :func:`batched_reset`/:func:`batched_step`,
@@ -360,10 +355,10 @@ class BatchedWindFarmEnv:
         self._obs: Observation | None = None
 
     def reset_fn(
-        self, key: Key[Array, ""], layouts: PerEnvLayouts | None = None
+        self, key: Key[Array, ""], layouts: FarmLayout | None = None
     ) -> tuple[EnvState, Observation]:
-        """Reset every lane; ``layouts`` (leading ``(envs,)`` axis) gives each lane
-        its own layout, else the shared config layout is tiled across lanes.
+        """Reset every env; ``layouts`` (leading ``(envs,)`` axis) gives each env
+        its own layout, else the shared config layout is tiled across envs.
 
         Pure in its arguments — ``self`` contributes only static config and the
         turbine tables — so the returned state can be carried through a scan.
@@ -386,7 +381,7 @@ class BatchedWindFarmEnv:
             _batched_step_jit(state, actions, self.turbine, self.params),
         )
 
-    def _batched_layout(self, layouts: PerEnvLayouts | None) -> PerEnvLayouts:
+    def _batched_layout(self, layouts: FarmLayout | None) -> FarmLayout:
         # step_fn always vmaps the layout over axis 0, so the shared config
         # layout has to be tiled once here rather than broadcast per step.
         if layouts is not None:
@@ -397,7 +392,7 @@ class BatchedWindFarmEnv:
             y=jnp.broadcast_to(self.layout.y, shape),
         )
 
-    def _validate_layouts(self, layouts: PerEnvLayouts) -> PerEnvLayouts:
+    def _validate_layouts(self, layouts: FarmLayout) -> FarmLayout:
         expected = (self.config.n_envs, self.n_turbines)
         for field_name, leaf in zip(FarmLayout._fields, layouts, strict=True):
             if leaf.shape != expected:
@@ -409,7 +404,7 @@ class BatchedWindFarmEnv:
         return layouts
 
     def reset(
-        self, key: Key[Array, ""], layouts: PerEnvLayouts | None = None
+        self, key: Key[Array, ""], layouts: FarmLayout | None = None
     ) -> Observation:
         """Stateful ``reset_fn``: stashes the new state and returns the observation."""
         state, obs = self.reset_fn(key, layouts)
@@ -433,7 +428,7 @@ class BatchedWindFarmEnv:
         n_steps: int,
         actor: Actor | None = None,
     ) -> Float[Array, "steps envs"]:
-        """Advance every lane ``n_steps`` steps as one fused ``lax.scan``.
+        """Advance every env ``n_steps`` steps as one fused ``lax.scan``.
 
         ``key`` seeds the per-step action keys; ``actor`` maps
         ``(action key, observation) -> (envs, turbines)`` actions and runs inside
