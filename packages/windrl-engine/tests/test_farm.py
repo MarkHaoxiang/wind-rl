@@ -1,4 +1,4 @@
-"""farm/ is fully implemented (design doc §"Package tree"); these run now."""
+"""farm/: the wind sampler's distribution, the site layouts, and the NREL-5MW tables."""
 
 import math
 from importlib.resources import files
@@ -11,26 +11,22 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 
 from windrl_engine.farm.layout import ROW_SPACING, horns_rev2, row_layout
-from windrl_engine.farm.turbine import POWER_SCALE, ct_lookup, nrel5mw_v4, power_lookup
+from windrl_engine.farm.turbine import (
+    CT_MAX,
+    POWER_SCALE,
+    ct_lookup,
+    nrel5mw_v4,
+    power_lookup,
+)
 from windrl_engine.farm.wind import sample_wind
 
 N_WIND_SAMPLES = 20_000
 
 
 def _wind_samples() -> tuple[jax.Array, jax.Array]:
-    # `Key[Array, ""]` (design doc's fixed signature) is a scalar typed key,
-    # i.e. `jax.random.key(...)`, not the legacy `uint32[2]` PRNGKey array.
     keys = jax.random.split(jax.random.key(0), N_WIND_SAMPLES)
     speed, direction = jax.vmap(sample_wind)(keys)
     return speed, direction
-
-
-def test_sample_wind_respects_clip_bounds() -> None:
-    speed, direction = _wind_samples()
-    assert bool(jnp.all(speed >= 0.0))
-    assert bool(jnp.all(speed <= 28.0))
-    assert bool(jnp.all(direction >= 0.0))
-    assert bool(jnp.all(direction <= 360.0))
 
 
 def test_sample_wind_speed_matches_8_weibull_8_moments() -> None:
@@ -50,6 +46,10 @@ def test_sample_wind_speed_matches_8_weibull_8_moments() -> None:
     se = expected_std / math.sqrt(N_WIND_SAMPLES)
     assert sample_mean == pytest.approx(expected_mean, abs=20 * se)
     assert sample_std == pytest.approx(expected_std, rel=0.05)
+    # The [0, 28] clip is an inf-guard for a uniform draw of exactly 0.0, not a
+    # physical cap: 28 m/s is ~30 sigma out (P ~ 1e-9780), so a sample that
+    # reaches either bound means the sampler, not the tail.
+    assert bool(jnp.all((speed >= 0.0) & (speed <= 28.0)))
 
 
 def test_sample_wind_direction_matches_normal_270_20_moments() -> None:
@@ -59,6 +59,7 @@ def test_sample_wind_direction_matches_normal_270_20_moments() -> None:
     se = 20.0 / math.sqrt(N_WIND_SAMPLES)
     assert sample_mean == pytest.approx(270.0, abs=20 * se)
     assert sample_std == pytest.approx(20.0, rel=0.05)
+    assert bool(jnp.all((direction >= 0.0) & (direction <= 360.0)))
 
 
 def test_row_layout_spacing_is_the_wfcrl_nominal_four_diameters() -> None:
@@ -128,12 +129,29 @@ def test_floris_yaml_still_makes_the_tilt_correction_a_no_op() -> None:
     assert yml["power_thrust_table"]["ref_tilt"] == 5.0
 
 
-def test_ct_lookup_matches_table_at_a_nonzero_node() -> None:
+def test_ct_lookup_interpolates_linearly_between_table_nodes() -> None:
+    # Midway between two nodes, not on one: nearest-neighbour or step lookup
+    # would land on 0.7871 or 0.7858 instead, both far outside 1e-9.
     spec = nrel5mw_v4()
-    ws = jnp.asarray(spec.wind_speed_table[16])  # 8.0 m/s, inside the C_t clip
-    assert float(ct_lookup(spec, ws)) == pytest.approx(
-        float(spec.thrust_table[16]), abs=1e-9
+    lower, upper = 16, 17  # 8.0 and 9.0 m/s, inside the C_t clip
+    midpoint = jnp.asarray(
+        0.5 * (spec.wind_speed_table[lower] + spec.wind_speed_table[upper])
     )
+    expected = 0.5 * (spec.thrust_table[lower] + spec.thrust_table[upper])
+
+    assert float(ct_lookup(spec, midpoint)) == pytest.approx(float(expected), abs=1e-9)
+
+
+def test_ct_lookup_clips_the_one_table_node_that_exceeds_the_upper_bound() -> None:
+    # nrel_5MW's C_t table is physically inconsistent at cut-in: it lists 1.132
+    # at 3.0 m/s, above the Betz-admissible 1. That single node is the only
+    # place the CT_MAX clip does anything, and dropping the clip would push a
+    # C_t > 1 into the axial-induction sqrt.
+    spec = nrel5mw_v4()
+    assert float(spec.thrust_table[2]) > CT_MAX
+    assert float(spec.wind_speed_table[2]) == 3.0
+    assert float(ct_lookup(spec, jnp.asarray(3.0))) == CT_MAX
+    assert np.all(np.asarray(spec.thrust_table)[3:] <= CT_MAX)
 
 
 def test_ct_lookup_clips_out_of_range_to_fill() -> None:
