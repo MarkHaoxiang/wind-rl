@@ -1,20 +1,26 @@
-from typing import Final, NamedTuple
+"""NREL-5MW turbine spec, read from the FLORIS-packaged ``nrel_5MW.yaml`` at import."""
+
+import importlib.util
+from pathlib import Path
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import jax.numpy as jnp
+import numpy as np
+import numpy.typing as npt
+import yaml  # type: ignore[import-untyped]
 from jaxtyping import Array, Float
-
-from windrl_engine.farm.floris_tables import load_nrel5mw_v4
 
 D: Final = 126.0  # nominal NREL-5MW rotor diameter for synthetic row-layout spacing
 HUB_HEIGHT: Final = 90.0  # nominal NREL-5MW hub height for synthetic query grids
 
 TABLE_SIZE: Final = 54
-TurbineTable = Float[Array, f"table={TABLE_SIZE}"]
 
-_V4 = load_nrel5mw_v4()
-_V4_WIND_SPEED: TurbineTable = jnp.asarray(_V4["wind_speed"])
-_V4_POWER_KW: TurbineTable = jnp.asarray(_V4["power_kw"])
-_V4_THRUST: TurbineTable = jnp.asarray(_V4["thrust"])
+if TYPE_CHECKING:
+    # jaxtyping needs the bare `np.ndarray` class, off which mypy reads numpy's
+    # `Any`-defaulted type parameters -- rejected by `disallow_any_explicit`.
+    TurbineTable = npt.NDArray[np.float64]
+else:
+    TurbineTable = Float[np.ndarray, f"table={TABLE_SIZE}"]
 
 
 class TurbineSpec(NamedTuple):
@@ -23,6 +29,10 @@ class TurbineSpec(NamedTuple):
     Electrical power is one interpolation of the absolute-kW ``power_table``
     scaled by ``power_scale`` (1e3 -> W). ``ct_fill_low``/``ct_fill_high`` are the
     fill values applied to ``C_t`` outside the wind-speed table before the clip.
+
+    Tables stay numpy float64 so their JAX dtype resolves at trace time under
+    whatever ``jax_enable_x64`` is then active, instead of being frozen by the
+    config that happened to hold when this module was first imported.
     """
 
     rotor_diameter: float
@@ -39,25 +49,43 @@ class TurbineSpec(NamedTuple):
     ct_fill_high: float
 
 
-def nrel5mw_v4() -> TurbineSpec:
-    """NREL-5MW as shipped in FLORIS 4.6.6 (cosine-loss, absolute-kW power table)."""
+def _floris_turbine_library() -> Path:
+    # find_spec locates the installed package without executing `floris/__init__`,
+    # which drags in scipy + shapely just to read one yaml (771ms -> 48ms import).
+    floris = importlib.util.find_spec("floris")
+    if floris is None or floris.submodule_search_locations is None:
+        raise ImportError("floris is required for its packaged turbine library")
+    return Path(floris.submodule_search_locations[0]) / "turbine_library"
+
+
+def _load_nrel5mw_v4() -> TurbineSpec:
+    path = _floris_turbine_library() / "nrel_5MW.yaml"
+    turbine = yaml.safe_load(path.read_text())
+    table = turbine["power_thrust_table"]
     return TurbineSpec(
-        rotor_diameter=float(_V4["rotor_diameter"]),
-        hub_height=float(_V4["hub_height"]),
-        pP=float(_V4["pP"]),  # cosine_loss_exponent_yaw
-        tsr=float(_V4["tsr"]),
-        generator_efficiency=float(_V4["generator_efficiency"]),  # baked into the table
-        ref_density=float(_V4["ref_density"]),
-        wind_speed_table=_V4_WIND_SPEED,
-        thrust_table=_V4_THRUST,
-        power_table=_V4_POWER_KW,
+        rotor_diameter=float(turbine["rotor_diameter"]),
+        hub_height=float(turbine["hub_height"]),
+        pP=float(table["cosine_loss_exponent_yaw"]),
+        tsr=float(turbine["TSR"]),
+        generator_efficiency=float(
+            table["controller_dependent_turbine_parameters"]["generator_efficiency"]
+        ),
+        ref_density=float(table["ref_air_density"]),
+        wind_speed_table=np.asarray(table["wind_speed"], dtype=np.float64),
+        thrust_table=np.asarray(table["thrust_coefficient"], dtype=np.float64),
+        power_table=np.asarray(table["power"], dtype=np.float64),
         power_scale=1e3,
         ct_fill_low=0.0001,
         ct_fill_high=0.0001,
     )
 
 
-DEFAULT_TURBINE: Final = nrel5mw_v4()
+DEFAULT_TURBINE: Final = _load_nrel5mw_v4()
+
+
+def nrel5mw_v4() -> TurbineSpec:
+    """NREL-5MW as shipped in FLORIS 4.6.6 (cosine-loss, absolute-kW power table)."""
+    return DEFAULT_TURBINE
 
 
 def ct_lookup(

@@ -113,7 +113,7 @@ def test_turbine_spec_matches_floris_yaml() -> None:
 
 def test_ct_lookup_matches_table_at_a_nonzero_node() -> None:
     spec = nrel5mw_v4()
-    ws = spec.wind_speed_table[16]  # 8.0 m/s, C_t inside the (1e-4, 0.9999) clip
+    ws = jnp.asarray(spec.wind_speed_table[16])  # 8.0 m/s, inside the C_t clip
     assert float(ct_lookup(spec, ws)) == pytest.approx(
         float(spec.thrust_table[16]), abs=1e-9
     )
@@ -131,7 +131,7 @@ def test_ct_lookup_clips_out_of_range_to_fill() -> None:
 
 def test_power_lookup_scales_abs_kw_table_to_watts() -> None:
     spec = nrel5mw_v4()
-    ws = spec.wind_speed_table[16]
+    ws = jnp.asarray(spec.wind_speed_table[16])
     expected = float(spec.power_table[16]) * spec.power_scale
     assert float(power_lookup(spec, ws)) == pytest.approx(expected, rel=1e-9)
 
