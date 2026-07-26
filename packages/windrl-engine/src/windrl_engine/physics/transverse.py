@@ -9,6 +9,22 @@ from windrl_engine.physics.flow import SHEAR
 from windrl_engine.physics.frame import RotorField, Scalar, cosd, sind
 
 KAPPA: Final = 0.41
+TWO_PI: Final = 2 * math.pi
+
+
+def _vortex(
+    sign: float,
+    circulation: Scalar,
+    y_locs: RotorField,
+    z_offset: RotorField,
+    eps: Scalar | float,
+    decay: RotorField,
+) -> tuple[RotorField, RotorField]:
+    r_squared = y_locs**2 + z_offset**2
+    core = 1.0 - jnp.exp(-r_squared / eps**2)
+    v = sign * circulation * z_offset / (TWO_PI * r_squared) * core * decay
+    w = -sign * circulation * y_locs / (TWO_PI * r_squared) * core * decay
+    return v, w
 
 
 def transverse_velocity(
@@ -65,73 +81,29 @@ def transverse_velocity(
     decay = eps**2 / (4 * nu * delta_x / freestream_velocity + eps**2)
     y_locs = (y - y_i) + NUM_EPS
 
-    two_pi = 2 * math.pi
-
-    z_top = z - (hub_height + D / 2) + NUM_EPS
-    r_top = y_locs**2 + z_top**2
-    core_top = 1.0 - jnp.exp(-r_top / eps**2)
-    v_top = gamma_top * z_top / (two_pi * r_top) * core_top * decay
-    w_top = -1.0 * gamma_top * y_locs / (two_pi * r_top) * core_top * decay
-
-    z_bottom = z - (hub_height - D / 2) + NUM_EPS
-    r_bottom = y_locs**2 + z_bottom**2
-    core_bottom = 1.0 - jnp.exp(-r_bottom / eps**2)
-    v_bottom = gamma_bottom * z_bottom / (two_pi * r_bottom) * core_bottom * decay
-    w_bottom = -1.0 * gamma_bottom * y_locs / (two_pi * r_bottom) * core_bottom * decay
-
-    z_core = z - hub_height + NUM_EPS
-    r_core = y_locs**2 + z_core**2
-    core_core = 1.0 - jnp.exp(-r_core / eps**2)
-    v_core = gamma_wake_rotation * z_core / (two_pi * r_core) * core_core * decay
-    w_core = -1.0 * gamma_wake_rotation * y_locs / (two_pi * r_core) * core_core * decay
-
-    z_top_mirror = z + (hub_height + D / 2) + NUM_EPS
-    r_top_mirror = y_locs**2 + z_top_mirror**2
-    core_top_mirror = 1.0 - jnp.exp(-r_top_mirror / eps**2)
-    v_top_mirror = (
-        -1.0
-        * gamma_top
-        * z_top_mirror
-        / (two_pi * r_top_mirror)
-        * core_top_mirror
-        * decay
+    # V1/W1 top
+    v_top, w_top = _vortex(
+        1.0, gamma_top, y_locs, z - (hub_height + D / 2) + NUM_EPS, eps, decay
     )
-    w_top_mirror = (
-        gamma_top * y_locs / (two_pi * r_top_mirror) * core_top_mirror * decay
+    # V2/W2 bottom
+    v_bottom, w_bottom = _vortex(
+        1.0, gamma_bottom, y_locs, z - (hub_height - D / 2) + NUM_EPS, eps, decay
     )
-
-    z_bottom_mirror = z + (hub_height - D / 2) + NUM_EPS
-    r_bottom_mirror = y_locs**2 + z_bottom_mirror**2
-    core_bottom_mirror = 1.0 - jnp.exp(-r_bottom_mirror / eps**2)
-    v_bottom_mirror = (
-        -1.0
-        * gamma_bottom
-        * z_bottom_mirror
-        / (two_pi * r_bottom_mirror)
-        * core_bottom_mirror
-        * decay
+    # V5/W5 wake rotation
+    v_core, w_core = _vortex(
+        1.0, gamma_wake_rotation, y_locs, z - hub_height + NUM_EPS, eps, decay
     )
-    w_bottom_mirror = (
-        gamma_bottom * y_locs / (two_pi * r_bottom_mirror) * core_bottom_mirror * decay
+    # V3/W3 top mirror
+    v_top_mirror, w_top_mirror = _vortex(
+        -1.0, gamma_top, y_locs, z + (hub_height + D / 2) + NUM_EPS, eps, decay
     )
-
-    z_core_mirror = z + hub_height + NUM_EPS
-    r_core_mirror = y_locs**2 + z_core_mirror**2
-    core_core_mirror = 1.0 - jnp.exp(-r_core_mirror / eps**2)
-    v_core_mirror = (
-        -1.0
-        * gamma_wake_rotation
-        * z_core_mirror
-        / (two_pi * r_core_mirror)
-        * core_core_mirror
-        * decay
+    # V4/W4 bottom mirror
+    v_bottom_mirror, w_bottom_mirror = _vortex(
+        -1.0, gamma_bottom, y_locs, z + (hub_height - D / 2) + NUM_EPS, eps, decay
     )
-    w_core_mirror = (
-        gamma_wake_rotation
-        * y_locs
-        / (two_pi * r_core_mirror)
-        * core_core_mirror
-        * decay
+    # V6/W6 wake-rotation mirror
+    v_core_mirror, w_core_mirror = _vortex(
+        -1.0, gamma_wake_rotation, y_locs, z + hub_height + NUM_EPS, eps, decay
     )
 
     v = v_top + v_bottom + v_top_mirror + v_bottom_mirror + v_core + v_core_mirror
