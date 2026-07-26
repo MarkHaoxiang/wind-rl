@@ -6,6 +6,7 @@ bytes, and prints a URL for the bundled canvas viewer.
 """
 
 import argparse
+import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from typing import cast, override
@@ -29,20 +30,15 @@ def meta_payload(record: EpisodeRecord, fields: EpisodeFields) -> dict[str, obje
         "field_shape": [ny, nx],
         "field_vmin": 0.0,
         "field_vmax": float(record.wind_speed.max()) if record.wind_speed.size else 1.0,
-        "hub_height": record.hub_height,
         "rotor_diameter": record.rotor_diameter,
-        "yaw_limit": record.yaw_limit,
         "seconds_per_step": record.seconds_per_step,
         "power_max": power_max if power_max > 0.0 else 1.0,
         "frames": {
             "yaw": record.yaw.tolist(),
-            "action": record.action.tolist(),
             "power": record.power.tolist(),
             "reward": record.reward.tolist(),
             "wind_speed": record.wind_speed.tolist(),
             "wind_direction": record.wind_direction.tolist(),
-            "local_wind_speed": record.local_wind_speed.tolist(),
-            "local_wind_direction": record.local_wind_direction.tolist(),
             "truncated": record.truncated.astype(bool).tolist(),
             "step_count": record.step_count.tolist(),
         },
@@ -82,7 +78,9 @@ class ReplayHandler(BaseHTTPRequestHandler):
         if route.path == "/":
             self._send(200, "text/html; charset=utf-8", server.html)
         elif route.path == "/api/meta":
-            body = json_dumps(meta_payload(server.record, server.fields))
+            body = json.dumps(meta_payload(server.record, server.fields)).encode(
+                "utf-8"
+            )
             self._send(200, "application/json", body)
         elif route.path == "/api/field":
             frame = _query_frame(route.query)
@@ -95,12 +93,6 @@ class ReplayHandler(BaseHTTPRequestHandler):
     @override
     def log_message(self, format: str, *args: object) -> None:
         del format, args
-
-
-def json_dumps(payload: dict[str, object]) -> bytes:
-    import json
-
-    return json.dumps(payload).encode("utf-8")
 
 
 def _query_frame(query: str) -> int:

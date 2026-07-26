@@ -80,7 +80,7 @@ def test_field_cache_returns_the_identical_array() -> None:
     assert fields.field_at(1) is fields.field_at(1)
 
 
-def test_meta_payload_is_json_serializable_with_full_per_frame_stats() -> None:
+def test_meta_payload_omits_fields_unused_by_the_viewer() -> None:
     record = _record()
     fields = EpisodeFields(record, resolution=(32, 32))
     payload = meta_payload(record, fields)
@@ -89,6 +89,29 @@ def test_meta_payload_is_json_serializable_with_full_per_frame_stats() -> None:
     assert round_tripped["n_turbines"] == 3
     assert len(round_tripped["frames"]["power"]) == record.yaw.shape[0]
     assert round_tripped["extent"][0] < round_tripped["extent"][1]
+    assert set(round_tripped) == {
+        "n_frames",
+        "n_turbines",
+        "layout_x",
+        "layout_y",
+        "extent",
+        "field_shape",
+        "field_vmin",
+        "field_vmax",
+        "rotor_diameter",
+        "seconds_per_step",
+        "power_max",
+        "frames",
+    }
+    assert set(round_tripped["frames"]) == {
+        "yaw",
+        "power",
+        "reward",
+        "wind_speed",
+        "wind_direction",
+        "truncated",
+        "step_count",
+    }
 
 
 def test_field_bytes_decode_to_the_field_shape() -> None:
