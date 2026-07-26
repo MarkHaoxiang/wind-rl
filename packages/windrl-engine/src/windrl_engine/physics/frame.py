@@ -15,7 +15,7 @@ Permutation = Int[Array, "turbines"]
 
 # The wake-field functions (initial_flow / deflection_field / deficit_field) evaluate at
 # arbitrary query points: rotor grids ("turbines grid grid") inside the solve, 2D planes
-# ("res_a res_b") under analysis/flow_viz. `*query` binds either polymorphically and,
+# ("res_a res_b") under physics/query_field. `*query` binds either polymorphically and,
 # reused across one signature, still pins those points to a single common shape.
 QueryField = Float[Array, "*query"]
 # Per-turbine turbulence intensity fed to those wake functions: a rotor-plane table
