@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -24,6 +24,8 @@ from windrl_engine.physics.turbulence import (
     wake_added_turbulence,
     yaw_added_mixing,
 )
+
+Fidelity = Literal["floris", "corrected"]
 
 
 class FlowSolution(NamedTuple):
@@ -59,7 +61,7 @@ def solve_farm(
     wind: WindCondition,
     yaw: Float[Array, "turbines"],
     *,
-    fidelity: str = "floris",
+    fidelity: Fidelity = "floris",
     turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> FlowSolution:
     """Steady-state GCH wake solve; fields in original turbine order.
