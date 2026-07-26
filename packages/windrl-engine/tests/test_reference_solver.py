@@ -3,8 +3,7 @@
 The reference is FLORIS 4.6.6 driven through its ``"defaults"`` configuration
 (GCH: secondary steering / yaw-added recovery / transverse velocities on, crespo
 constant 0.5, cosine-loss nrel_5MW), computed in-process once per session. Both
-stacks run float64; the spec targets <1e-10 relative, so 1e-9 leaves one order
-of margin.
+stacks run float64.
 """
 
 from collections.abc import Callable
@@ -21,7 +20,10 @@ from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import solve_farm
 
-RTOL = 1e-9
+RTOL = 1e-12
+# v and w cross zero across the rotor plane, so their relative error blows up where
+# the reference is near-zero; they get a looser rtol and lean on the absolute floor.
+TRANSVERSE_RTOL = 1e-9
 AMBIENT_TI = 0.06
 
 # (case id, layout builder, wind direction [deg, 270 = from the west], speed, yaw)
@@ -83,14 +85,12 @@ def test_flow_ti_and_power_match_floris(
     wind = WindCondition(speed=jnp.asarray(speed), direction=jnp.asarray(direction))
     solution = solve_farm(layout, wind, yaw_arr, turbine=turbine)
 
+    np.testing.assert_allclose(np.asarray(solution.u), reference["u"], rtol=RTOL)
     np.testing.assert_allclose(
-        np.asarray(solution.u), reference["u"], rtol=RTOL, atol=1e-9
+        np.asarray(solution.v), reference["v"], rtol=TRANSVERSE_RTOL, atol=1e-9
     )
     np.testing.assert_allclose(
-        np.asarray(solution.v), reference["v"], rtol=RTOL, atol=1e-9
-    )
-    np.testing.assert_allclose(
-        np.asarray(solution.w), reference["w"], rtol=RTOL, atol=1e-9
+        np.asarray(solution.w), reference["w"], rtol=TRANSVERSE_RTOL, atol=1e-9
     )
     np.testing.assert_allclose(
         np.asarray(solution.turbulence_intensity),
