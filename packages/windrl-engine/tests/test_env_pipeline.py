@@ -171,13 +171,14 @@ def test_step_truncates_on_the_horizon_minus_1th_agent_step() -> None:
     horizon = 5
     expected_truncated = [False, False, False, True]
     for expected in expected_truncated:
-        state, _, _, truncated = step(
+        out = step(
             layout,
             state,
             jnp.zeros(2),
             EnvParams(yaw_step=5.0, reward_fn=WfcrlReward(0.1), horizon=horizon),
         )
-        assert bool(truncated) == expected
+        state = out.state
+        assert bool(out.truncated) == expected
     assert int(state.step_count) == horizon
 
 

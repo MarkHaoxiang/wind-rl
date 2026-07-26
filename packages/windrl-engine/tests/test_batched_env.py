@@ -70,16 +70,17 @@ def test_batched_step_matches_stacked_single_farm_step_calls() -> None:
     ]
 
     actions = jnp.asarray([[3.0, -2.0], [0.0, 0.0], [5.0, -5.0]])
-    obs, reward, truncated = env.step(actions)
+    obs, reward, truncated, extras = env.step(actions)
 
     for i, lane_state in enumerate(lane_states):
-        _, expected_obs, expected_reward, expected_truncated = step(
-            env.layout, lane_state, actions[i], env.params
-        )
-        assert jnp.allclose(obs.yaw[i], expected_obs.yaw, atol=1e-9)
-        assert jnp.allclose(obs.freewind[i], expected_obs.freewind, atol=1e-9)
-        assert jnp.allclose(reward[i], expected_reward, atol=1e-9)
-        assert bool(truncated[i]) == bool(expected_truncated)
+        expected = step(env.layout, lane_state, actions[i], env.params)
+        assert jnp.allclose(obs.yaw[i], expected.obs.yaw, atol=1e-9)
+        assert jnp.allclose(obs.freewind[i], expected.obs.freewind, atol=1e-9)
+        assert jnp.allclose(reward[i], expected.reward, atol=1e-9)
+        assert bool(truncated[i]) == bool(expected.truncated)
+        # The powers the reward was computed from ride out in the step extras
+        # instead of forcing a consumer to re-solve the wake.
+        assert jnp.allclose(extras.powers[i], expected.powers, atol=1e-9)
 
 
 def test_injected_reward_fn_changes_only_the_reward_value() -> None:
@@ -99,19 +100,17 @@ def test_injected_reward_fn_changes_only_the_reward_value() -> None:
     action = jnp.asarray([3.0, -2.0])
 
     state, _ = reset(default_env.layout, key)
-    default_state, default_obs, default_reward, default_truncated = step(
-        default_env.layout, state, action, default_env.params
-    )
-    custom_state, custom_obs, custom_reward, custom_truncated = step(
+    default_out = step(default_env.layout, state, action, default_env.params)
+    custom_out = step(
         default_env.layout,
         state,
         action,
         replace(default_env.params, reward_fn=negated_reward),
     )
-    assert jnp.array_equal(default_state.yaw, custom_state.yaw)
-    assert jnp.array_equal(default_obs.yaw, custom_obs.yaw)
-    assert bool(default_truncated) == bool(custom_truncated)
-    assert jnp.allclose(custom_reward, -default_reward, atol=1e-9)
+    assert jnp.array_equal(default_out.state.yaw, custom_out.state.yaw)
+    assert jnp.array_equal(default_out.obs.yaw, custom_out.obs.yaw)
+    assert bool(default_out.truncated) == bool(custom_out.truncated)
+    assert jnp.allclose(custom_out.reward, -default_out.reward, atol=1e-9)
 
     custom_env = BatchedWindFarmEnv(config, reward_fn=negated_reward)
     default_obs_b = default_env.reset(key)
@@ -119,8 +118,8 @@ def test_injected_reward_fn_changes_only_the_reward_value() -> None:
     assert jnp.array_equal(default_obs_b.yaw, custom_obs_b.yaw)
 
     actions = jnp.asarray([[3.0, -2.0], [0.0, 0.0]])
-    default_obs_b, default_reward_b, default_trunc_b = default_env.step(actions)
-    custom_obs_b, custom_reward_b, custom_trunc_b = custom_env.step(actions)
+    default_obs_b, default_reward_b, default_trunc_b, _ = default_env.step(actions)
+    custom_obs_b, custom_reward_b, custom_trunc_b, _ = custom_env.step(actions)
     assert jnp.array_equal(default_obs_b.yaw, custom_obs_b.yaw)
     assert jnp.array_equal(default_trunc_b, custom_trunc_b)
     assert jnp.allclose(custom_reward_b, -default_reward_b, atol=1e-9)
@@ -156,39 +155,33 @@ def test_reset_gives_each_lane_an_independent_wind_draw() -> None:
             assert not jnp.allclose(obs.freewind[i], obs.freewind[j])
 
 
-def test_lane_that_truncates_gets_a_fresh_reset_observation_on_the_same_call() -> None:
+def test_truncation_returns_the_reset_obs_and_keeps_the_terminal_one() -> None:
     # horizon=3 with reset's step_count=1 floor means truncation fires on the
     # 2nd agent step; both lanes share one horizon so they truncate together
     # (this env has no mechanism for lanes to desynchronize their step_count).
     config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=2, horizon=3)
     env = BatchedWindFarmEnv(config)
-    key = jax.random.key(3)
-    env.reset(key)
+    state, _ = env.reset_fn(jax.random.key(3))
     actions = jnp.zeros((2, 2))
 
-    obs_before, _, truncated_before = env.step(actions)  # step_count 1 -> 2
-    assert bool(jnp.all(~truncated_before))
-    assert env._state is not None
-    assert jnp.array_equal(env._state.farm.step_count, jnp.asarray([2, 2]))
+    before = env.step_fn(state, actions, jax.random.key(11))  # step_count 1 -> 2
+    assert bool(jnp.all(~before.truncated))
+    assert jnp.array_equal(before.state.farm.step_count, jnp.asarray([2, 2]))
 
-    key_before_reset_call = env._key
-    obs_after, _, truncated_after = env.step(actions)  # step_count 2 -> 3 == horizon
-    assert bool(jnp.all(truncated_after))
+    step_key = jax.random.key(12)
+    after = env.step_fn(before.state, actions, step_key)  # 2 -> 3 == horizon
+    assert bool(jnp.all(after.truncated))
+    assert jnp.array_equal(after.state.farm.step_count, jnp.asarray([1, 1]))
 
-    # Replicate BatchedWindFarmEnv.step's key derivation (env/env.py) to get
-    # the exact reset key `_batched_step` used for the auto-reset this call.
-    _, step_key = jax.random.split(key_before_reset_call)
     _, reset_key = jax.random.split(step_key)
-    lane_keys = jax.random.split(reset_key, config.n_envs)
-    expected = [reset(env.layout, k)[1] for k in lane_keys]
-
-    assert env._state is not None
-    assert jnp.array_equal(env._state.farm.step_count, jnp.asarray([1, 1]))
-    for i, expected_obs in enumerate(expected):
-        assert jnp.array_equal(obs_after.yaw[i], expected_obs.yaw)
-        assert jnp.array_equal(obs_after.freewind[i], expected_obs.freewind)
-    # The wind was genuinely resampled, not carried over from the truncated episode.
-    assert not jnp.allclose(obs_after.freewind, obs_before.freewind)
+    for i, lane_key in enumerate(jax.random.split(reset_key, config.n_envs)):
+        _, expected_obs = reset(env.layout, lane_key)
+        assert jnp.array_equal(after.obs.yaw[i], expected_obs.yaw)
+        assert jnp.array_equal(after.obs.freewind[i], expected_obs.freewind)
+    # The returned observation is the fresh episode's, so the terminal state --
+    # the one a time-limit bootstrap needs -- survives only in the extras.
+    assert jnp.array_equal(after.extras.terminal_obs.freewind, before.obs.freewind)
+    assert not jnp.allclose(after.obs.freewind, after.extras.terminal_obs.freewind)
 
 
 def test_rollout_matches_a_python_loop_of_step_with_the_same_actor() -> None:
@@ -211,7 +204,7 @@ def test_rollout_matches_a_python_loop_of_step_with_the_same_actor() -> None:
     manual_rewards = []
     for _ in range(n_steps):
         actions = actor(jax.random.key(0), obs)
-        obs, reward, truncated = loop_env.step(actions)
+        obs, reward, truncated, _ = loop_env.step(actions)
         assert bool(jnp.all(~truncated))
         manual_rewards.append(reward)
 
@@ -262,8 +255,8 @@ def test_discrete_control_mode_matches_the_equivalent_continuous_delta_stream() 
     ]
     for discrete_actions in discrete_streams:
         continuous_actions = (discrete_actions - 1.0) * yaw_step
-        obs_d, reward_d, truncated_d = discrete_env.step(discrete_actions)
-        obs_c, reward_c, truncated_c = continuous_env.step(continuous_actions)
+        obs_d, reward_d, truncated_d, _ = discrete_env.step(discrete_actions)
+        obs_c, reward_c, truncated_c, _ = continuous_env.step(continuous_actions)
         assert jnp.allclose(obs_d.yaw, obs_c.yaw, atol=1e-9)
         assert jnp.allclose(reward_d, reward_c, atol=1e-9)
         assert jnp.array_equal(truncated_d, truncated_c)
@@ -277,14 +270,10 @@ def test_single_farm_step_honours_the_requested_control_mode() -> None:
     action = jnp.asarray([2.0, 0.0])
     params = EnvParams(yaw_step=5.0, reward_fn=WfcrlReward(0.1), horizon=50)
 
-    discrete_state, *_ = step(
-        layout, state, action, replace(params, control_mode="discrete")
-    )
-    continuous_state, *_ = step(
-        layout, state, action, replace(params, control_mode="continuous")
-    )
-    assert jnp.array_equal(discrete_state.yaw, jnp.asarray([5.0, -5.0]))
-    assert jnp.array_equal(continuous_state.yaw, jnp.asarray([2.0, 0.0]))
+    discrete = step(layout, state, action, replace(params, control_mode="discrete"))
+    continuous = step(layout, state, action, replace(params, control_mode="continuous"))
+    assert jnp.array_equal(discrete.state.yaw, jnp.asarray([5.0, -5.0]))
+    assert jnp.array_equal(continuous.state.yaw, jnp.asarray([2.0, 0.0]))
 
 
 def test_action_space_continuous_bounds_match_the_configured_yaw_step() -> None:
@@ -338,12 +327,10 @@ def test_per_env_layouts_make_each_lane_solve_its_own_layout() -> None:
         assert jnp.allclose(obs.wind_direction[i], expected_obs.wind_direction)
 
     actions = jnp.asarray([[3.0, -2.0], [1.0, 0.0], [5.0, -5.0]])
-    _, reward, _ = env.step(actions)
+    _, reward, _, _ = env.step(actions)
     for i, lane_state in enumerate(lane_states):
-        _, _, expected_reward, _ = step(
-            _lane_layout(layouts, i), lane_state, actions[i], env.params
-        )
-        assert jnp.allclose(reward[i], expected_reward)
+        expected = step(_lane_layout(layouts, i), lane_state, actions[i], env.params)
+        assert jnp.allclose(reward[i], expected.reward)
 
 
 def test_layouts_none_reproduces_the_config_shared_layout_trajectory() -> None:
@@ -367,8 +354,8 @@ def test_layouts_none_reproduces_the_config_shared_layout_trajectory() -> None:
         jnp.asarray([[5.0, 5.0], [-5.0, -5.0], [1.0, -1.0]]),
     ]
     for actions in action_stream:
-        s_obs, s_reward, s_trunc = shared_env.step(actions)
-        n_obs, n_reward, n_trunc = none_env.step(actions)
+        s_obs, s_reward, s_trunc, _ = shared_env.step(actions)
+        n_obs, n_reward, n_trunc, _ = none_env.step(actions)
         assert jnp.array_equal(s_obs.yaw, n_obs.yaw)
         assert jnp.array_equal(s_obs.wind_speed, n_obs.wind_speed)
         assert jnp.array_equal(s_reward, n_reward)
@@ -382,35 +369,29 @@ def test_per_env_layout_is_fixed_across_auto_reset_while_wind_resamples() -> Non
     # a *new* wind draw, and the stored layout is unchanged.
     config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=2, horizon=3)
     env = BatchedWindFarmEnv(config)
-    key = jax.random.key(3)
     layouts = _per_env_layouts()
     layouts = FarmLayout(x=layouts.x[:2], y=layouts.y[:2])
-    env.reset(key, layouts)
+    state, _ = env.reset_fn(jax.random.key(3), layouts)
     actions = jnp.zeros((2, 2))
 
-    obs_before, _, truncated_before = env.step(actions)  # step_count 1 -> 2
-    assert bool(jnp.all(~truncated_before))
+    before = env.step_fn(state, actions, jax.random.key(11))  # step_count 1 -> 2
+    assert bool(jnp.all(~before.truncated))
 
-    key_before_reset_call = env._key
-    obs_after, _, truncated_after = env.step(actions)  # 2 -> 3 == horizon
-    assert bool(jnp.all(truncated_after))
+    step_key = jax.random.key(12)
+    after = env.step_fn(before.state, actions, step_key)  # 2 -> 3 == horizon
+    assert bool(jnp.all(after.truncated))
 
-    # Replicate the exact auto-reset key genealogy (env/env.py) for this call.
-    _, step_key = jax.random.split(key_before_reset_call)
     _, reset_key = jax.random.split(step_key)
-    lane_keys = jax.random.split(reset_key, config.n_envs)
-
-    for i, lane_key in enumerate(lane_keys):
+    for i, lane_key in enumerate(jax.random.split(reset_key, config.n_envs)):
         _, expected_obs = reset(_lane_layout(layouts, i), lane_key)
-        assert jnp.array_equal(obs_after.yaw[i], expected_obs.yaw)
-        assert jnp.array_equal(obs_after.freewind[i], expected_obs.freewind)
-        assert jnp.allclose(obs_after.wind_speed[i], expected_obs.wind_speed)
+        assert jnp.array_equal(after.obs.yaw[i], expected_obs.yaw)
+        assert jnp.array_equal(after.obs.freewind[i], expected_obs.freewind)
+        assert jnp.allclose(after.obs.wind_speed[i], expected_obs.wind_speed)
     # Wind was genuinely resampled, not carried from the truncated episode.
-    assert not jnp.allclose(obs_after.freewind, obs_before.freewind)
+    assert not jnp.allclose(after.obs.freewind, before.obs.freewind)
     # The layout the env solves is unchanged by the auto-reset.
-    assert env._state is not None
-    assert jnp.array_equal(env._state.layout.x, layouts.x)
-    assert jnp.array_equal(env._state.layout.y, layouts.y)
+    assert jnp.array_equal(after.state.layout.x, layouts.x)
+    assert jnp.array_equal(after.state.layout.y, layouts.y)
 
 
 def test_per_env_layout_with_wrong_turbine_count_raises_eagerly() -> None:

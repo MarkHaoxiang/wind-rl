@@ -40,8 +40,8 @@ def _evaluate_jit(
         state, obs, scan_key = carry
         scan_key, step_key = jax.random.split(scan_key)
         actions = actor.mode(agent_features(obs))
-        state, obs, reward, _ = env.step_fn(state, actions, step_key)
-        return (state, obs, scan_key), reward
+        out = env.step_fn(state, actions, step_key)
+        return (out.state, out.obs, scan_key), out.reward
 
     _, rewards = jax.lax.scan(
         advance_one_step, (state, obs, scan_key), None, length=n_steps

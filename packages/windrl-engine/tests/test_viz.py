@@ -70,6 +70,22 @@ def test_sweeping_actor_visibly_moves_yaw_off_zero(record: EpisodeRecord) -> Non
     assert float(np.abs(record.yaw[-1]).max()) > 10.0
 
 
+def test_a_truncated_frame_shows_the_episodes_final_state_not_its_auto_reset() -> None:
+    # horizon=3 truncates on the 2nd agent step and every 2nd step after. The
+    # frame at a boundary must still be the finished episode's last state (the
+    # env's returned observation is already the fresh one), so the freestream
+    # only changes on the frame *after* the boundary.
+    env = BatchedWindFarmEnv(
+        WindFarmEnvConfig(layout="turb3_row1", n_envs=1, horizon=3)
+    )
+    record = record_episode(env, jax.random.key(0), n_steps=4)
+
+    assert record.truncated.tolist() == [False, False, True, False, True]
+    assert record.step_count.tolist() == [1, 2, 3, 2, 3]
+    assert record.wind_speed[2] == record.wind_speed[1]
+    assert record.wind_speed[3] != record.wind_speed[2]
+
+
 def test_save_load_round_trips_every_field_exactly(
     record: EpisodeRecord, tmp_path
 ) -> None:  # type: ignore[no-untyped-def]

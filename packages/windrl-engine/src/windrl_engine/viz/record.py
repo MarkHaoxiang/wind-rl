@@ -26,9 +26,10 @@ RecordActor = Callable[[Key[Array, ""], Observation], Float[Array, "envs turbine
 class EpisodeRecord(NamedTuple):
     """One env lane's rollout, everything a replay viewer needs, as host arrays.
 
-    Frame 0 is the reset state; frames ``1..T-1`` follow each agent step. Angles
-    are degrees, powers watts, speeds m/s. ``truncated[t]`` marks a horizon
-    boundary whose frame already shows the auto-reset lane.
+    Frame 0 is the reset state; frame ``t`` is the state the ``t``-th action
+    produced, before any auto-reset — so ``truncated[t]`` marks an episode's
+    true final frame, and its successor is one step into the fresh episode.
+    Angles are degrees, powers watts, speeds m/s.
     """
 
     layout_x: npt.NDArray[np.float32]  # (turbines,) world meters
@@ -51,28 +52,19 @@ class EpisodeRecord(NamedTuple):
     step_count: npt.NDArray[np.int32]  # (frames,)
 
 
-def _frame_powers(
-    env: BatchedWindFarmEnv,
-    wind_speed: Float[Array, "frames"],
-    wind_direction: Float[Array, "frames"],
-    yaw: Float[Array, "frames turbines"],
-) -> Float[Array, "frames turbines"]:
-    layout = env.layout
-    turbine = env.turbine
-    fidelity = env.config.fidelity
-
-    def one_frame(
-        speed: Float[Array, ""],
-        direction: Float[Array, ""],
-        frame_yaw: Float[Array, "turbines"],
-    ) -> Float[Array, "turbines"]:
-        wind = WindCondition(speed=speed, direction=direction)
-        solution = solve_farm(
-            layout, wind, frame_yaw, fidelity=fidelity, turbine=turbine
-        )
-        return turbine_powers(solution.u, frame_yaw, turbine=turbine)
-
-    return jax.vmap(one_frame)(wind_speed, wind_direction, yaw)
+def _reset_frame_powers(
+    env: BatchedWindFarmEnv, obs: Observation, env_index: int
+) -> Float[Array, "turbines"]:
+    # Every other frame's powers come free out of the step; only the reset frame
+    # has to be solved for, because reset returns the observation alone.
+    wind = WindCondition(
+        speed=obs.freewind[env_index, 0], direction=obs.freewind[env_index, 1]
+    )
+    yaw = obs.yaw[env_index]
+    solution = solve_farm(
+        env.layout, wind, yaw, fidelity=env.params.fidelity, turbine=env.turbine
+    )
+    return turbine_powers(solution.u, yaw, turbine=env.turbine)
 
 
 def record_episode(
@@ -94,13 +86,14 @@ def record_episode(
 
     yaw_frames = [obs.yaw[env_index]]
     action_frames = [jnp.zeros(n_turbines)]
+    power_frames = [_reset_frame_powers(env, obs, env_index)]
     reward_frames = [jnp.asarray(0.0)]
     freestream_speed = [obs.freewind[env_index, 0]]
     freestream_direction = [obs.freewind[env_index, 1]]
     local_speed = [obs.wind_speed[env_index]]
     local_direction = [obs.wind_direction[env_index]]
     truncated_frames = [jnp.asarray(False)]
-    step_count_frames = [jnp.asarray(1)]
+    step_counts = [1]
 
     for _ in range(n_steps):
         key, action_key = jax.random.split(key)
@@ -109,21 +102,22 @@ def record_episode(
             if actor is None
             else actor(action_key, obs)
         )
-        obs, reward, truncated = env.step(actions)
-        yaw_frames.append(obs.yaw[env_index])
+        obs, reward, truncated, extras = env.step(actions)
+        # The frame is the state the action produced, so it reads the terminal
+        # observation: on a truncating step `obs` has already been auto-reset.
+        frame_obs = extras.terminal_obs
+        yaw_frames.append(frame_obs.yaw[env_index])
         action_frames.append(actions[env_index])
+        power_frames.append(extras.powers[env_index])
         reward_frames.append(reward[env_index])
-        freestream_speed.append(obs.freewind[env_index, 0])
-        freestream_direction.append(obs.freewind[env_index, 1])
-        local_speed.append(obs.wind_speed[env_index])
-        local_direction.append(obs.wind_direction[env_index])
+        freestream_speed.append(frame_obs.freewind[env_index, 0])
+        freestream_direction.append(frame_obs.freewind[env_index, 1])
+        local_speed.append(frame_obs.wind_speed[env_index])
+        local_direction.append(frame_obs.wind_direction[env_index])
         truncated_frames.append(truncated[env_index])
-        step_count_frames.append(step_count_frames[-1] + 1)
-
-    yaw = jnp.stack(yaw_frames)
-    wind_speed = jnp.stack(freestream_speed)
-    wind_direction = jnp.stack(freestream_direction)
-    power = _frame_powers(env, wind_speed, wind_direction, yaw)
+        # A truncated frame is an episode's last, so the next one is the first
+        # step of a fresh episode (whose reset state already counts as step 1).
+        step_counts.append(2 if bool(truncated_frames[-2]) else step_counts[-1] + 1)
 
     return EpisodeRecord(
         layout_x=np.asarray(env.layout.x, dtype=np.float32),
@@ -132,17 +126,17 @@ def record_episode(
         rotor_diameter=float(env.turbine.rotor_diameter),
         yaw_limit=float(YAW_LIMIT),
         seconds_per_step=60.0,  # env.actions.DT: FLORIS interface timestep
-        fidelity=env.config.fidelity,
-        yaw=np.asarray(yaw, dtype=np.float32),
+        fidelity=env.params.fidelity,
+        yaw=np.asarray(jnp.stack(yaw_frames), dtype=np.float32),
         action=np.asarray(jnp.stack(action_frames), dtype=np.float32),
-        power=np.asarray(power, dtype=np.float32),
+        power=np.asarray(jnp.stack(power_frames), dtype=np.float32),
         reward=np.asarray(jnp.stack(reward_frames), dtype=np.float32),
-        wind_speed=np.asarray(wind_speed, dtype=np.float32),
-        wind_direction=np.asarray(wind_direction, dtype=np.float32),
+        wind_speed=np.asarray(jnp.stack(freestream_speed), dtype=np.float32),
+        wind_direction=np.asarray(jnp.stack(freestream_direction), dtype=np.float32),
         local_wind_speed=np.asarray(jnp.stack(local_speed), dtype=np.float32),
         local_wind_direction=np.asarray(jnp.stack(local_direction), dtype=np.float32),
         truncated=np.asarray(jnp.stack(truncated_frames), dtype=np.bool_),
-        step_count=np.asarray(jnp.stack(step_count_frames), dtype=np.int32),
+        step_count=np.asarray(step_counts, dtype=np.int32),
     )
 
 

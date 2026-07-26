@@ -115,6 +115,14 @@ class EnvParams:
     fidelity: Fidelity = "floris"
 
 
+class StepOut(NamedTuple):
+    state: FarmState
+    obs: Observation
+    reward: Float[Array, ""]
+    truncated: Bool[Array, ""]
+    powers: Float[Array, "turbines"]  # watts, at the yaw this step applied
+
+
 def step(
     layout: FarmLayout,
     state: FarmState,
@@ -122,7 +130,7 @@ def step(
     params: EnvParams,
     *,
     turbine: TurbineSpec = DEFAULT_TURBINE,
-) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
+) -> StepOut:
     freestream_speed = state.wind.speed
     applied = apply_action(
         state.yaw,
@@ -149,7 +157,7 @@ def step(
     obs = _observation(applied.yaw, state.wind, speed, direction)
     reward = params.reward_fn(powers, loads, freestream_speed)
     truncated = step_count == params.horizon
-    return new_state, obs, reward, truncated
+    return StepOut(new_state, obs, reward, truncated, powers)
 
 
 Actor = Callable[[Key[Array, ""], Observation], Float[Array, "envs turbines"]]
@@ -170,74 +178,8 @@ def _tree_where_lane[T](mask: Bool[Array, "envs"], true_tree: T, false_tree: T) 
     )
 
 
-class _StepOut(NamedTuple):
-    state: FarmState
-    obs: Observation
-    reward: Float[Array, "envs"]
-    truncated: Bool[Array, "envs"]
-
-
-def _batched_step(
-    layout: PerEnvLayouts,
-    state: FarmState,
-    actions: Float[Array, "envs turbines"],
-    key: Key[Array, ""],
-    turbine: TurbineSpec,
-    params: EnvParams,
-) -> _StepOut:
-    def step_one_farm(
-        layout: FarmLayout, state: FarmState, action: Float[Array, "turbines"]
-    ) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
-        return step(layout, state, action, params, turbine=turbine)
-
-    new_state, obs, reward, truncated = jax.vmap(step_one_farm)(layout, state, actions)
-    _, reset_key = jax.random.split(key)
-
-    def do_reset(
-        operand: tuple[FarmState, Observation],
-    ) -> tuple[FarmState, Observation]:
-        current_state, current_obs = operand
-
-        def reset_one_farm(
-            layout: FarmLayout, key: Key[Array, ""]
-        ) -> tuple[FarmState, Observation]:
-            return reset(layout, key, fidelity=params.fidelity, turbine=turbine)
-
-        keys = jax.random.split(reset_key, truncated.shape[0])
-        fresh_state, fresh_obs = jax.vmap(reset_one_farm)(layout, keys)
-        return _tree_where_lane(
-            truncated, (fresh_state, fresh_obs), (current_state, current_obs)
-        )
-
-    def no_reset(
-        operand: tuple[FarmState, Observation],
-    ) -> tuple[FarmState, Observation]:
-        return operand
-
-    reset_state, reset_obs = cast(
-        tuple[FarmState, Observation],
-        jax.lax.cond(jnp.any(truncated), do_reset, no_reset, (new_state, obs)),
-    )
-    return _StepOut(reset_state, reset_obs, reward, truncated)
-
-
-def _batched_reset(
-    layout: PerEnvLayouts,
-    keys: Key[Array, "envs"],
-    turbine: TurbineSpec,
-    *,
-    fidelity: Fidelity,
-) -> tuple[FarmState, Observation]:
-    def reset_one_farm(
-        layout: FarmLayout, key: Key[Array, ""]
-    ) -> tuple[FarmState, Observation]:
-        return reset(layout, key, fidelity=fidelity, turbine=turbine)
-
-    return jax.vmap(reset_one_farm)(layout, keys)
-
-
 class EnvState(NamedTuple):
-    """Everything ``step_fn`` needs to advance a batch of lanes, all leaves
+    """Everything ``batched_step`` needs to advance a batch of lanes, all leaves
     batched over a leading ``(envs,)`` axis.
 
     ``layout`` rides in the state rather than being resampled: device-side
@@ -247,6 +189,102 @@ class EnvState(NamedTuple):
 
     farm: FarmState
     layout: PerEnvLayouts
+
+
+class StepExtras(NamedTuple):
+    """Per-step quantities the next action does not need, but a learner or a
+    replay viewer does."""
+
+    #: The observation of the state the action actually produced. It differs
+    #: from the returned observation exactly on a truncating lane, whose
+    #: observation has already been replaced by its auto-reset — so this is what
+    #: bootstraps V(s_T) under a time limit, and the episode's true final frame.
+    terminal_obs: Observation
+    powers: Float[Array, "envs turbines"]  # watts, at the yaw this step applied
+
+
+class BatchedStepOut(NamedTuple):
+    state: EnvState
+    obs: Observation
+    reward: Float[Array, "envs"]
+    truncated: Bool[Array, "envs"]
+    extras: StepExtras
+
+
+def batched_step(
+    state: EnvState,
+    actions: Float[Array, "envs turbines"],
+    key: Key[Array, ""],
+    turbine: TurbineSpec,
+    params: EnvParams,
+) -> BatchedStepOut:
+    """Advance every lane one step, auto-resetting the lanes that hit the horizon.
+
+    ``key`` seeds the wind redraw of those lanes; every lane keeps the layout
+    held in ``state``. Pure and ``lax.scan``-safe: ``params`` is jit-static.
+    """
+
+    def step_one_farm(
+        layout: FarmLayout, farm: FarmState, action: Float[Array, "turbines"]
+    ) -> StepOut:
+        return step(layout, farm, action, params, turbine=turbine)
+
+    stepped = jax.vmap(step_one_farm)(state.layout, state.farm, actions)
+    truncated = stepped.truncated
+    _, reset_key = jax.random.split(key)
+
+    def do_reset(
+        operand: tuple[FarmState, Observation],
+    ) -> tuple[FarmState, Observation]:
+        current_farm, current_obs = operand
+
+        def reset_one_farm(
+            layout: FarmLayout, key: Key[Array, ""]
+        ) -> tuple[FarmState, Observation]:
+            return reset(layout, key, fidelity=params.fidelity, turbine=turbine)
+
+        keys = jax.random.split(reset_key, truncated.shape[0])
+        fresh_farm, fresh_obs = jax.vmap(reset_one_farm)(state.layout, keys)
+        return _tree_where_lane(
+            truncated, (fresh_farm, fresh_obs), (current_farm, current_obs)
+        )
+
+    def no_reset(
+        operand: tuple[FarmState, Observation],
+    ) -> tuple[FarmState, Observation]:
+        return operand
+
+    farm, obs = cast(
+        tuple[FarmState, Observation],
+        jax.lax.cond(
+            jnp.any(truncated), do_reset, no_reset, (stepped.state, stepped.obs)
+        ),
+    )
+    return BatchedStepOut(
+        state=EnvState(farm=farm, layout=state.layout),
+        obs=obs,
+        reward=stepped.reward,
+        truncated=truncated,
+        extras=StepExtras(terminal_obs=stepped.obs, powers=stepped.powers),
+    )
+
+
+def batched_reset(
+    layout: PerEnvLayouts,
+    keys: Key[Array, "envs"],
+    turbine: TurbineSpec,
+    *,
+    fidelity: Fidelity,
+) -> tuple[EnvState, Observation]:
+    """Reset every lane on its own key; ``layout`` carries a leading ``(envs,)`` axis."""
+
+    def reset_one_farm(
+        layout: FarmLayout, key: Key[Array, ""]
+    ) -> tuple[FarmState, Observation]:
+        return reset(layout, key, fidelity=fidelity, turbine=turbine)
+
+    farm, obs = jax.vmap(reset_one_farm)(layout, keys)
+    return EnvState(farm=farm, layout=layout), obs
 
 
 def _scan_rollout(
@@ -271,16 +309,8 @@ def _scan_rollout(
         sample_key, action_key = jax.random.split(sample_key)
         actions = default_actions if actor is None else actor(action_key, obs)
         env_key, step_key = jax.random.split(env_key)
-        out = _batched_step(
-            state.layout, state.farm, actions, step_key, turbine, params
-        )
-        carry = (
-            EnvState(farm=out.state, layout=state.layout),
-            out.obs,
-            env_key,
-            sample_key,
-        )
-        return carry, out.reward
+        out = batched_step(state, actions, step_key, turbine, params)
+        return (out.state, out.obs, env_key, sample_key), out.reward
 
     env_key, sample_key = jax.random.split(key)
     (final_state, final_obs, _, _), rewards = jax.lax.scan(
@@ -291,8 +321,8 @@ def _scan_rollout(
 
 # One cache per jitted function, keyed on EnvParams by value: identically
 # configured envs share their compiled step instead of retracing per instance.
-_batched_reset_jit = jax.jit(_batched_reset, static_argnames=("fidelity",))
-_batched_step_jit = jax.jit(_batched_step, static_argnames=("params",))
+_batched_reset_jit = jax.jit(batched_reset, static_argnames=("fidelity",))
+_batched_step_jit = jax.jit(batched_step, static_argnames=("params",))
 _scan_rollout_jit = jax.jit(
     _scan_rollout, static_argnames=("params", "n_steps", "actor")
 )
@@ -308,9 +338,10 @@ class BatchedWindFarmEnv:
     optionally takes per-env ``layouts`` (leading ``(envs,)`` axis), letting
     each lane solve its own fixed layout instead of the shared default.
 
-    ``reset_fn``/``step_fn`` are the pure, ``lax.scan``-safe form of that API —
-    they thread an explicit :class:`EnvState` instead of stashing it. The
-    stateful ``reset``/``step``/``rollout`` are shells over them for scripts and
+    ``reset_fn``/``step_fn`` bind this env's layout, turbine tables and
+    :class:`EnvParams` to the pure :func:`batched_reset`/:func:`batched_step`,
+    which thread an explicit :class:`EnvState`. The stateful
+    ``reset``/``step``/``rollout`` are shells over them for scripts and
     notebooks; a trainer should scan ``step_fn``.
     """
 
@@ -343,33 +374,23 @@ class BatchedWindFarmEnv:
         """
         layout = self._batched_layout(layouts)
         keys = jax.random.split(key, self.config.n_envs)
-        farm, obs = cast(
-            tuple[FarmState, Observation],
+        return cast(
+            tuple[EnvState, Observation],
             _batched_reset_jit(
                 layout, keys, self.turbine, fidelity=self.params.fidelity
             ),
         )
-        return EnvState(farm=farm, layout=layout), obs
 
     def step_fn(
         self,
         state: EnvState,
         actions: Float[Array, "envs turbines"],
         key: Key[Array, ""],
-    ) -> tuple[EnvState, Observation, Float[Array, "envs"], Bool[Array, "envs"]]:
-        """Advance every lane one step. ``key`` seeds the wind redraw of whichever
-        lanes hit their horizon; those lanes keep the layout held in ``state``."""
-        out = cast(
-            _StepOut,
-            _batched_step_jit(
-                state.layout, state.farm, actions, key, self.turbine, self.params
-            ),
-        )
-        return (
-            EnvState(farm=out.state, layout=state.layout),
-            out.obs,
-            out.reward,
-            out.truncated,
+    ) -> BatchedStepOut:
+        """:func:`batched_step` under this env's compiled step."""
+        return cast(
+            BatchedStepOut,
+            _batched_step_jit(state, actions, key, self.turbine, self.params),
         )
 
     def _batched_layout(self, layouts: PerEnvLayouts | None) -> PerEnvLayouts:
@@ -405,15 +426,15 @@ class BatchedWindFarmEnv:
 
     def step(
         self, actions: Float[Array, "envs turbines"]
-    ) -> tuple[Observation, Float[Array, "envs"], Bool[Array, "envs"]]:
+    ) -> tuple[Observation, Float[Array, "envs"], Bool[Array, "envs"], StepExtras]:
         """Stateful ``step_fn``: advances the stashed state, which ``reset`` must
         have created."""
         if self._state is None:
             raise RuntimeError("call reset before step")
         self._key, step_key = jax.random.split(self._key)
-        state, obs, reward, truncated = self.step_fn(self._state, actions, step_key)
-        self._state, self._obs = state, obs
-        return obs, reward, truncated
+        out = self.step_fn(self._state, actions, step_key)
+        self._state, self._obs = out.state, out.obs
+        return out.obs, out.reward, out.truncated, out.extras
 
     def rollout(
         self,

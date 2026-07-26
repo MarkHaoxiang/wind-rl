@@ -54,7 +54,7 @@ def test_scan_matches_stateful() -> None:
     env.reset(key)
     stateful_rewards, stateful_truncated = [], []
     for _ in range(n_steps):
-        _, reward, truncated = env.step(_ACTIONS)
+        _, reward, truncated, _ = env.step(_ACTIONS)
         stateful_rewards.append(reward)
         stateful_truncated.append(truncated)
 
@@ -68,8 +68,8 @@ def test_scan_matches_stateful() -> None:
     def scan_step(
         state: EnvState, step_key: jax.Array
     ) -> tuple[EnvState, tuple[jax.Array, jax.Array]]:
-        state, _, reward, truncated = env.step_fn(state, _ACTIONS, step_key)
-        return state, (reward, truncated)
+        out = env.step_fn(state, _ACTIONS, step_key)
+        return out.state, (out.reward, out.truncated)
 
     _, (rewards, truncated) = jax.lax.scan(scan_step, state, jnp.stack(step_keys))
 
@@ -103,8 +103,8 @@ def test_per_env_layouts_survive_autoreset() -> None:
     state, _ = env.reset_fn(jax.random.key(0), layouts)
 
     def scan_step(state: EnvState, step_key: jax.Array) -> tuple[EnvState, jax.Array]:
-        state, _, _, truncated = env.step_fn(state, jnp.zeros((2, 3)), step_key)
-        return state, truncated
+        out = env.step_fn(state, jnp.zeros((2, 3)), step_key)
+        return out.state, out.truncated
 
     state, truncated = jax.lax.scan(
         scan_step, state, jax.random.split(jax.random.key(1), 4)
