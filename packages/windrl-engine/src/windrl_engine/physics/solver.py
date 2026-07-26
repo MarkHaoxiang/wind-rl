@@ -66,11 +66,8 @@ def solve_farm(
 ) -> FlowSolution:
     """Steady-state GCH wake solve; fields in original turbine order.
 
-    ``fidelity="corrected"`` (static; a separate jit specialization) drops two FLORIS
-    reference quirks: the rotor-plane self-interaction becomes a deterministic strict
-    self-exclusion (independent of ``x_i`` float rounding), and the yaw-added-recovery
-    TI update is applied before *both* the deflection and deficit calls (the reference
-    lets deflection see the stale TI). ``turbine`` selects the NREL-5MW library.
+    ``fidelity`` is static (one jit specialization each): ``"floris"`` reproduces the
+    reference's numerical quirks, ``"corrected"`` drops them.
     """
     corrected = fidelity == "corrected"
     x_rot, y_rot = rotate_to_wind_frame(layout.x, layout.y, wind.direction)
@@ -138,8 +135,10 @@ def solve_farm(
         # FLORIS mutates turbulence_intensity_i in place: the deficit always sees the
         # yaw-mixing-updated TI; the reference lets the deflection keep the stale TI,
         # while `corrected` feeds both the updated value.
-        ti = carry.turbulence_intensity.at[i].add(GCH_GAIN * yaw_mixing_ti_increment)
-        ti_deflection = ti[i] if corrected else ti_i
+        ti_after_mixing = carry.turbulence_intensity.at[i].add(
+            GCH_GAIN * yaw_mixing_ti_increment
+        )
+        ti_deflection = ti_after_mixing[i] if corrected else ti_i
 
         deflection = deflection_field(
             x_sorted,
@@ -160,14 +159,14 @@ def solve_farm(
             y_i,
             ct_i,
             yaw_i,
-            ti[i],
+            ti_after_mixing[i],
             turbine=turbine,
         )
         wake_field = jnp.hypot(carry.wake_field, deficit * u_initial)
 
         wake_added_ti = crespo_hernandez(x_sorted, x_i, a_i, turbine=turbine)
-        ti = wake_added_turbulence(
-            ti,
+        ti_after_wake = wake_added_turbulence(
+            ti_after_mixing,
             deficit,
             u_initial,
             wake_added_ti,
@@ -178,7 +177,7 @@ def solve_farm(
             turbine=turbine,
         )
 
-        return _Carry(wake_field, carry.v + v_wake, carry.w + w_wake, ti)
+        return _Carry(wake_field, carry.v + v_wake, carry.w + w_wake, ti_after_wake)
 
     init = _Carry(
         jnp.zeros_like(u_initial),

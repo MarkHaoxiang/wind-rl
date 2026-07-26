@@ -18,13 +18,14 @@ def _gaussian_deficit_terms(
 ) -> tuple[QueryField, QueryField]:
     a = 1.0 / (2.0 * sigma_y**2)
     c = 1.0 / (2.0 * sigma_z**2)
-    r = a * (y - y_i - deflection) ** 2 + c * (z - turbine.hub_height) ** 2
+    r_squared = a * (y - y_i - deflection) ** 2 + c * (z - turbine.hub_height) ** 2
     d = jnp.clip(
         1.0 - ct_i * cosd(yaw) / (8.0 * sigma_y * sigma_z / turbine.rotor_diameter**2),
         0.0,
         1.0,
     )
-    return r, 1.0 - jnp.sqrt(d)
+    # (r_squared, C) of FLORIS's rC()
+    return r_squared, 1.0 - jnp.sqrt(d)
 
 
 def deficit_field(
@@ -70,18 +71,18 @@ def deficit_field(
     near_base = ramp_down * 0.501 * D * jnp.sqrt(ct_i / 2.0)
     sigma_y_near = (near_base + ramp_up * sigma_y0) * (x >= xR) + (x < xR) * 0.5 * D
     sigma_z_near = (near_base + ramp_up * sigma_z0) * (x >= xR) + (x < xR) * 0.5 * D
-    r_near, c_near = _gaussian_deficit_terms(
+    r_squared_near, amplitude_near = _gaussian_deficit_terms(
         sigma_y_near, sigma_z_near, y, y_i, deflection, z, ct_i, yaw, turbine
     )
-    near_deficit = c_near * jnp.exp(-r_near) * near_mask
+    near_deficit = amplitude_near * jnp.exp(-r_squared_near) * near_mask
 
     ky = KA * ti_i + KB
     kz = KA * ti_i + KB
     sigma_y_far = (ky * (x - x0) + sigma_y0) * far_mask + sigma_y0 * (x < x0)
     sigma_z_far = (kz * (x - x0) + sigma_z0) * far_mask + sigma_z0 * (x < x0)
-    r_far, c_far = _gaussian_deficit_terms(
+    r_squared_far, amplitude_far = _gaussian_deficit_terms(
         sigma_y_far, sigma_z_far, y, y_i, deflection, z, ct_i, yaw, turbine
     )
-    far_deficit = c_far * jnp.exp(-r_far) * far_mask
+    far_deficit = amplitude_far * jnp.exp(-r_squared_far) * far_mask
 
     return near_deficit + far_deficit

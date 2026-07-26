@@ -27,20 +27,15 @@ def transverse_velocity(
     turbine: TurbineSpec = DEFAULT_TURBINE,
     self_exclude: bool = False,
 ) -> tuple[RotorField, RotorField]:
-    """Spanwise/vertical velocities (v, w) from turbine `i`'s 3 real + 3 mirror vortices.
-
-    ``self_exclude`` (corrected fidelity): gate the source planes with ``delta_x > 0``
-    so turbine `i`'s own rotor plane is deterministically excluded, independent of the
-    floating-point rounding of ``x_i`` (the FLORIS ULP quirk uses ``delta_x >= 0``).
-    """
+    """Spanwise/vertical velocities (v, w) from turbine `i`'s 3 real + 3 mirror vortices."""
     D = turbine.rotor_diameter
-    HUB_HEIGHT = turbine.hub_height
+    hub_height = turbine.hub_height
     tip_speed_ratio = turbine.tsr
     mixing_length = D / 8
     eps = EPS_GAIN * D
 
-    vel_top = ((HUB_HEIGHT + D / 2) / HUB_HEIGHT) ** SHEAR
-    vel_bottom = ((HUB_HEIGHT - D / 2) / HUB_HEIGHT) ** SHEAR
+    vel_top = ((hub_height + D / 2) / hub_height) ** SHEAR
+    vel_bottom = ((hub_height - D / 2) / hub_height) ** SHEAR
     gamma_top = (
         sind(yaw_i)
         * cosd(yaw_i)
@@ -72,25 +67,25 @@ def transverse_velocity(
 
     two_pi = 2 * math.pi
 
-    z_top = z - (HUB_HEIGHT + D / 2) + NUM_EPS
+    z_top = z - (hub_height + D / 2) + NUM_EPS
     r_top = y_locs**2 + z_top**2
     core_top = 1.0 - jnp.exp(-r_top / eps**2)
     v_top = gamma_top * z_top / (two_pi * r_top) * core_top * decay
     w_top = -1.0 * gamma_top * y_locs / (two_pi * r_top) * core_top * decay
 
-    z_bottom = z - (HUB_HEIGHT - D / 2) + NUM_EPS
+    z_bottom = z - (hub_height - D / 2) + NUM_EPS
     r_bottom = y_locs**2 + z_bottom**2
     core_bottom = 1.0 - jnp.exp(-r_bottom / eps**2)
     v_bottom = gamma_bottom * z_bottom / (two_pi * r_bottom) * core_bottom * decay
     w_bottom = -1.0 * gamma_bottom * y_locs / (two_pi * r_bottom) * core_bottom * decay
 
-    z_core = z - HUB_HEIGHT + NUM_EPS
+    z_core = z - hub_height + NUM_EPS
     r_core = y_locs**2 + z_core**2
     core_core = 1.0 - jnp.exp(-r_core / eps**2)
     v_core = gamma_wake_rotation * z_core / (two_pi * r_core) * core_core * decay
     w_core = -1.0 * gamma_wake_rotation * y_locs / (two_pi * r_core) * core_core * decay
 
-    z_top_mirror = z + (HUB_HEIGHT + D / 2) + NUM_EPS
+    z_top_mirror = z + (hub_height + D / 2) + NUM_EPS
     r_top_mirror = y_locs**2 + z_top_mirror**2
     core_top_mirror = 1.0 - jnp.exp(-r_top_mirror / eps**2)
     v_top_mirror = (
@@ -105,7 +100,7 @@ def transverse_velocity(
         gamma_top * y_locs / (two_pi * r_top_mirror) * core_top_mirror * decay
     )
 
-    z_bottom_mirror = z + (HUB_HEIGHT - D / 2) + NUM_EPS
+    z_bottom_mirror = z + (hub_height - D / 2) + NUM_EPS
     r_bottom_mirror = y_locs**2 + z_bottom_mirror**2
     core_bottom_mirror = 1.0 - jnp.exp(-r_bottom_mirror / eps**2)
     v_bottom_mirror = (
@@ -120,7 +115,7 @@ def transverse_velocity(
         gamma_bottom * y_locs / (two_pi * r_bottom_mirror) * core_bottom_mirror * decay
     )
 
-    z_core_mirror = z + HUB_HEIGHT + NUM_EPS
+    z_core_mirror = z + hub_height + NUM_EPS
     r_core_mirror = y_locs**2 + z_core_mirror**2
     core_core_mirror = 1.0 - jnp.exp(-r_core_mirror / eps**2)
     v_core_mirror = (
@@ -141,6 +136,8 @@ def transverse_velocity(
 
     v = v_top + v_bottom + v_top_mirror + v_bottom_mirror + v_core + v_core_mirror
     w = w_top + w_bottom + w_top_mirror + w_bottom_mirror + w_core + w_core_mirror
+    # self_exclude drops turbine `i`'s own rotor plane deterministically; FLORIS's
+    # `>= 0` instead lets the floating-point rounding of `x_i` decide.
     gate = delta_x > 0.0 if self_exclude else delta_x >= 0.0
     v = jnp.where(gate, v, 0.0)
     w = jnp.where(gate, w, 0.0)

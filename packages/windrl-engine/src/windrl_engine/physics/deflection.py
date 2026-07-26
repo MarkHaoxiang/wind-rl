@@ -74,8 +74,8 @@ def deflection_field(
     delta_near = ((x - xR) / (x0 - xR)) * delta0
     delta_near = delta_near * ((x >= xR) & (x <= x0))
 
-    sigma_y = (KA * ti_i + KB) * (x - x0) + sigma_y0
-    sigma_z = (KA * ti_i + KB) * (x - x0) + sigma_z0
+    sigma_y = ky * (x - x0) + sigma_y0
+    sigma_z = kz * (x - x0) + sigma_z0
     sigma_y = sigma_y * (x >= x0) + sigma_y0 * (x < x0)
     sigma_z = sigma_z * (x >= x0) + sigma_z0 * (x < x0)
 
@@ -105,12 +105,12 @@ def wake_added_yaw(
 ) -> Scalar:
     """Secondary-steering effective yaw (deg) that reproduces the induced spanwise velocity."""
     D = turbine.rotor_diameter
-    HUB_HEIGHT = turbine.hub_height
+    hub_height = turbine.hub_height
     tip_speed_ratio = turbine.tsr
     eps = EPS_GAIN * D
 
-    vel_top = ((HUB_HEIGHT + D / 2) / HUB_HEIGHT) ** SHEAR
-    vel_bottom = ((HUB_HEIGHT - D / 2) / HUB_HEIGHT) ** SHEAR
+    vel_top = ((hub_height + D / 2) / hub_height) ** SHEAR
+    vel_bottom = ((hub_height - D / 2) / hub_height) ** SHEAR
     gamma_top = (math.pi / 8) * D * vel_top * freestream_velocity * ct_i
     gamma_bottom = -1.0 * (math.pi / 8) * D * vel_bottom * freestream_velocity * ct_i
     gamma_wake_rotation = (
@@ -119,19 +119,19 @@ def wake_added_yaw(
 
     y_locs = delta_y_i + NUM_EPS
 
-    z_top = z_i - (HUB_HEIGHT + D / 2) + NUM_EPS
+    z_top = z_i - (hub_height + D / 2) + NUM_EPS
     r_top = y_locs**2 + z_top**2
     core_top = 1.0 - jnp.exp(-r_top / eps**2)
     v_top = jnp.mean(gamma_top * z_top / (2 * math.pi * r_top) * core_top)
 
-    z_bottom = z_i - (HUB_HEIGHT - D / 2) + NUM_EPS
+    z_bottom = z_i - (hub_height - D / 2) + NUM_EPS
     r_bottom = y_locs**2 + z_bottom**2
     core_bottom = 1.0 - jnp.exp(-r_bottom / eps**2)
     v_bottom = jnp.mean(
         gamma_bottom * z_bottom / (2 * math.pi * r_bottom) * core_bottom
     )
 
-    z_core = z_i - HUB_HEIGHT + NUM_EPS
+    z_core = z_i - hub_height + NUM_EPS
     r_core = y_locs**2 + z_core**2
     core_core = 1.0 - jnp.exp(-r_core / eps**2)
     v_core = jnp.mean(gamma_wake_rotation * z_core / (2 * math.pi * r_core) * core_core)
