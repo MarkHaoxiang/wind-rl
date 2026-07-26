@@ -61,11 +61,16 @@ warn_required_dynamic_aliases = true
 module = ["wandb.*", "floris.*"]
 ignore_missing_imports = true
 
-# The wandb logger wraps an untyped client: strict `disallow_any`/untyped-call
+# The Logger protocol's log_config carries an arbitrary experiment config, so
+# `dict[str, Any]` is the contract itself, not a type-gap in our code.
+[[tool.mypy.overrides]]
+module = ["windrl_train.logging", "windrl_train.logging.*"]
+disallow_any_explicit = false
+
+# The wandb logger wraps an untyped client: strict untyped-call/unreachable
 # checks there flag wandb's own type gaps, not our bugs.
 [[tool.mypy.overrides]]
-module = ["windrl_train.logging"]
-disallow_any_explicit = false
+module = ["windrl_train.logging.wandb"]
 disallow_untyped_calls = false
 warn_unreachable = false
 

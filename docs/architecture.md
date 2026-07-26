@@ -64,8 +64,9 @@ rewritten in-repo.
   repo.
 - `verdict.py`: `windowed_delta`, the per-run learning-signal score frameworks
   gate on.
-- `logging.py`: `WandbLogger`, a wandb run wrapper honoring
-  `WIND_RL_WDIR`/`WIND_RL_WANDB_MODE` via `WindRlSettings`.
+- `logging/`: `Logger` protocol (`log_stat`/`log_config`/`stop`) plus its
+  `wandb`/`console`/`null` implementations, so trainer code never imports
+  wandb directly.
 
 ## Outputs
 
