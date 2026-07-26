@@ -40,7 +40,7 @@ pure-functional (`NamedTuple` PyTrees, single-farm cores, batched via
 - `design/`: `Designer` type alias (a pure `(key, batch) -> layouts` callable,
   no `Protocol` — current designers are stateless closures), `SiteSpec`,
   `project_feasible` min-spacing projection, random/grid designers.
-- `analysis/`: `flow_viz.py`, `metrics.py` (wind-rose power), `plots.py`.
+- `analysis/`: `flow_viz.py`, `metrics.py` (wind-rose power).
 - `viz/`: episode replay — `record.py` (`EpisodeRecord` + `.npz` save/load and
   the recorder), `field.py` (per-frame hub-height wake fields, cached),
   `server.py` + `app.html` (stdlib HTTP server and the bundled canvas viewer,
