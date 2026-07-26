@@ -1,10 +1,16 @@
 from typing import Final, Literal, NamedTuple
 
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Bool, Float, Int
+
+from windrl_engine.physics.solver import Fidelity
+
+# Re-exported (not just used locally): callers still import Fidelity from here
+# rather than physics.solver, so mypy's strict reexport check needs this made
+# explicit.
+__all__ = ["Fidelity"]
 
 ControlMode = Literal["continuous", "discrete"]
-Fidelity = Literal["floris", "corrected"]
 
 SLEW_RATE: Final = 0.3  # deg/s, matches WFCRL's yaw actuator rate
 DT: Final = 60.0  # s, matches WFCRL's FLORIS interface timestep
@@ -15,7 +21,7 @@ YAW_LIMIT: Final = 40.0  # deg, matches WFCRL's yaw bound
 def duty_over_active(
     accumulator: Float[Array, "turbines"],
     step_count: Int[Array, ""],
-) -> Float[Array, "turbines"]:
+) -> Bool[Array, "turbines"]:
     """Boolean mask: turbines slewing over ``DUTY_FRACTION`` of elapsed wall time."""
     # step_count counts agent steps starting from reset's step_count=1, matching
     # WFCRL's num_moves convention (independent of the reset burn-in); the
