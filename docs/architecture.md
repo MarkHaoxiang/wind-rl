@@ -17,14 +17,16 @@ py3.12 venv, fully declared in the package `pyproject.toml`s (`uv sync`).
 ## `windrl-engine`
 
 From-scratch JAX reimplementation of the WFCRL/FLORIS GCH wake model,
-verified live to ~1e-13 against FLORIS 4.6.6 (a pinned runtime dependency;
-WFCRL is not);
+verified live against FLORIS 4.6.6 (a pinned runtime dependency; WFCRL is
+not) at rtol 1e-12 for u/turbulence-intensity/power and rtol 1e-9 (+atol) for
+the near-zero v/w transverse components;
 pure-functional (`NamedTuple` PyTrees, single-farm cores, batched via
-`jit(vmap)`), layered `farm` -> `physics` -> `env` (plus `design`, `metrics`
-and `viz`), each layer importing only from lower ones.
+`jit(vmap)`), layered `farm` -> `physics` -> `env`, with `viz` sitting above
+both env and physics (plus `design` and `metrics`), each layer importing only
+from lower ones.
 
 - `farm/`: `turbine.py` (`TurbineSpec`, NREL-5MW read from FLORIS's packaged
-  `nrel_5MW.yaml` at import via `farm/floris_tables.py`), `layout.py`
+  `nrel_5MW.yaml` at import, without importing floris itself), `layout.py`
   (`FarmLayout` + registry `turb3_row1`/`ablaincourt`/`horns_rev2`),
   `wind.py` (`WindCondition`, sampling, `WindRose`), `state.py` (`FarmState`:
   yaws + wind).
@@ -40,9 +42,9 @@ and `viz`), each layer importing only from lower ones.
   pure `lax.scan`-safe `EnvState`/`reset_fn`/`step_fn` API that the stateful
   `reset`/`step`/`rollout` wrap; reward is a dependency-injected `RewardFn`,
   defaulting to the `wfcrl_reward` factory).
-- `design/`: `Designer` type alias (a pure `(key, batch) -> layouts` callable,
-  no `Protocol` — current designers are stateless closures), `SiteSpec`,
-  `project_feasible` min-spacing projection, random/grid designers.
+- `design/`: `Designer`, a `@runtime_checkable` `Protocol` for a pure
+  `(key, batch) -> layouts` callable, `SiteSpec`, `project_feasible`
+  min-spacing projection, and the `fixed`/`random_uniform` designers.
 - `metrics.py`: rose-weighted power surface, AEP and wake loss.
 - `viz/`: episode replay and flow pictures — `record.py` (`EpisodeRecord` +
   `.npz` save/load and the recorder), `plane.py` (horizontal/vertical slice
@@ -50,8 +52,9 @@ and `viz`), each layer importing only from lower ones.
   fields, LRU-cached), `server.py` + `app.html` (stdlib HTTP server and the
   bundled canvas viewer, run via `python -m windrl_engine.viz episode.npz`).
 - `tests/`: live parity against FLORIS 4.6.6, physics invariants, and a
-  beartype import hook that makes jaxtyping shape annotations
-  runtime-checked.
+  beartype import hook that runtime-checks jaxtyping shape annotations across
+  `farm/`, `physics/`, `design/` and `metrics.py` (`env` batches those same
+  un-batched aliases under `vmap` and is excluded).
 
 ## `windrl-train`
 
