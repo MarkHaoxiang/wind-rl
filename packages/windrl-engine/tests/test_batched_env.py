@@ -22,12 +22,6 @@ from windrl_engine.farm.layout import FarmLayout
 _LAYOUT = [(0.0, 0.0), (504.0, 0.0)]
 
 
-def _lane_reset_keys(seed_key: jax.Array, n_envs: int) -> jax.Array:
-    # Mirrors BatchedWindFarmEnv.reset's own key derivation.
-    internal_key, _ = jax.random.split(seed_key)
-    return jax.random.split(internal_key, n_envs)
-
-
 def _per_env_layouts() -> FarmLayout:
     # Same turbine count as _LAYOUT so only positions differ per lane; the
     # downstream turbine's x varies so each lane's wake solve -- and hence its
@@ -47,7 +41,7 @@ def test_batched_reset_matches_stacked_single_farm_reset_calls() -> None:
     key = jax.random.key(7)
 
     obs = env.reset(key)
-    lane_keys = _lane_reset_keys(key, config.n_envs)
+    lane_keys = jax.random.split(key, config.n_envs)
 
     for i, lane_key in enumerate(lane_keys):
         _, expected_obs = reset(env.layout, lane_key)
@@ -66,7 +60,7 @@ def test_batched_step_matches_stacked_single_farm_step_calls() -> None:
 
     env.reset(key)
     lane_states = [
-        reset(env.layout, k)[0] for k in _lane_reset_keys(key, config.n_envs)
+        reset(env.layout, k)[0] for k in jax.random.split(key, config.n_envs)
     ]
 
     actions = jnp.asarray([[3.0, -2.0], [0.0, 0.0], [5.0, -5.0]])
@@ -164,17 +158,16 @@ def test_truncation_returns_the_reset_obs_and_keeps_the_terminal_one() -> None:
     state, _ = env.reset_fn(jax.random.key(3))
     actions = jnp.zeros((2, 2))
 
-    before = env.step_fn(state, actions, jax.random.key(11))  # step_count 1 -> 2
+    before = env.step_fn(state, actions)  # step_count 1 -> 2
     assert bool(jnp.all(~before.truncated))
     assert jnp.array_equal(before.state.farm.step_count, jnp.asarray([2, 2]))
 
-    step_key = jax.random.key(12)
-    after = env.step_fn(before.state, actions, step_key)  # 2 -> 3 == horizon
+    after = env.step_fn(before.state, actions)  # 2 -> 3 == horizon
     assert bool(jnp.all(after.truncated))
     assert jnp.array_equal(after.state.farm.step_count, jnp.asarray([1, 1]))
 
-    _, reset_key = jax.random.split(step_key)
-    for i, lane_key in enumerate(jax.random.split(reset_key, config.n_envs)):
+    # Each lane redraws from the key it was carrying, not from a shared one.
+    for i, lane_key in enumerate(before.state.farm.key):
         _, expected_obs = reset(env.layout, lane_key)
         assert jnp.array_equal(after.obs.yaw[i], expected_obs.yaw)
         assert jnp.array_equal(after.obs.freewind[i], expected_obs.freewind)
@@ -313,7 +306,7 @@ def test_per_env_layouts_make_each_lane_solve_its_own_layout() -> None:
     layouts = _per_env_layouts()
 
     obs = env.reset(key, layouts)
-    lane_keys = _lane_reset_keys(key, config.n_envs)
+    lane_keys = jax.random.split(key, config.n_envs)
     lane_states = []
     for i, lane_key in enumerate(lane_keys):
         lane_state, expected_obs = reset(_lane_layout(layouts, i), lane_key)
@@ -374,15 +367,13 @@ def test_per_env_layout_is_fixed_across_auto_reset_while_wind_resamples() -> Non
     state, _ = env.reset_fn(jax.random.key(3), layouts)
     actions = jnp.zeros((2, 2))
 
-    before = env.step_fn(state, actions, jax.random.key(11))  # step_count 1 -> 2
+    before = env.step_fn(state, actions)  # step_count 1 -> 2
     assert bool(jnp.all(~before.truncated))
 
-    step_key = jax.random.key(12)
-    after = env.step_fn(before.state, actions, step_key)  # 2 -> 3 == horizon
+    after = env.step_fn(before.state, actions)  # 2 -> 3 == horizon
     assert bool(jnp.all(after.truncated))
 
-    _, reset_key = jax.random.split(step_key)
-    for i, lane_key in enumerate(jax.random.split(reset_key, config.n_envs)):
+    for i, lane_key in enumerate(before.state.farm.key):
         _, expected_obs = reset(_lane_layout(layouts, i), lane_key)
         assert jnp.array_equal(after.obs.yaw[i], expected_obs.yaw)
         assert jnp.array_equal(after.obs.freewind[i], expected_obs.freewind)

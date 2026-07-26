@@ -29,21 +29,17 @@ def _evaluate_jit(
     key: Key[Array, ""],
     n_steps: int,
 ) -> Float[Array, ""]:
-    reset_key, scan_key = jax.random.split(key)
-    state, obs = env.reset_fn(reset_key)
+    state, obs = env.reset_fn(key)
 
-    Carry = tuple[EnvState, Observation, Key[Array, ""]]
+    Carry = tuple[EnvState, Observation]
 
     def advance_one_step(
         carry: Carry, _step: None
     ) -> tuple[Carry, Float[Array, "envs"]]:
-        state, obs, scan_key = carry
-        scan_key, step_key = jax.random.split(scan_key)
+        state, obs = carry
         actions = actor.mode(agent_features(obs))
-        out = env.step_fn(state, actions, step_key)
-        return (out.state, out.obs, scan_key), out.reward
+        out = env.step_fn(state, actions)
+        return (out.state, out.obs), out.reward
 
-    _, rewards = jax.lax.scan(
-        advance_one_step, (state, obs, scan_key), None, length=n_steps
-    )
+    _, rewards = jax.lax.scan(advance_one_step, (state, obs), None, length=n_steps)
     return jnp.mean(rewards)

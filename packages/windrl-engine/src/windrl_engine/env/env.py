@@ -214,14 +214,13 @@ class BatchedStepOut(NamedTuple):
 def batched_step(
     state: EnvState,
     actions: Float[Array, "envs turbines"],
-    key: Key[Array, ""],
     turbine: TurbineSpec,
     params: EnvParams,
 ) -> BatchedStepOut:
     """Advance every lane one step, auto-resetting the lanes that hit the horizon.
 
-    ``key`` seeds the wind redraw of those lanes; every lane keeps the layout
-    held in ``state``. Pure and ``lax.scan``-safe: ``params`` is jit-static.
+    Deterministic in its arguments: a lane redraws its wind from its own key in
+    ``state``, and keeps the layout held there. ``params`` is jit-static.
     """
 
     def step_one_farm(
@@ -231,7 +230,6 @@ def batched_step(
 
     stepped = jax.vmap(step_one_farm)(state.layout, state.farm, actions)
     truncated = stepped.truncated
-    _, reset_key = jax.random.split(key)
 
     def do_reset(
         operand: tuple[FarmState, Observation],
@@ -239,12 +237,13 @@ def batched_step(
         current_farm, current_obs = operand
 
         def reset_one_farm(
-            layout: FarmLayout, key: Key[Array, ""]
+            layout: FarmLayout, farm: FarmState
         ) -> tuple[FarmState, Observation]:
-            return reset(layout, key, fidelity=params.fidelity, turbine=turbine)
+            # Each lane advances its own stream, so the draws stay independent
+            # (and shard with the lane) instead of fanning out of a host key.
+            return reset(layout, farm.key, fidelity=params.fidelity, turbine=turbine)
 
-        keys = jax.random.split(reset_key, truncated.shape[0])
-        fresh_farm, fresh_obs = jax.vmap(reset_one_farm)(state.layout, keys)
+        fresh_farm, fresh_obs = jax.vmap(reset_one_farm)(state.layout, current_farm)
         return _tree_where_lane(
             truncated, (fresh_farm, fresh_obs), (current_farm, current_obs)
         )
@@ -300,21 +299,19 @@ def _scan_rollout(
     idle = 1.0 if params.control_mode == "discrete" else 0.0
     default_actions = jnp.full(state.layout.x.shape, idle)
 
-    Carry = tuple[EnvState, Observation, Key[Array, ""], Key[Array, ""]]
+    Carry = tuple[EnvState, Observation, Key[Array, ""]]
 
     def advance_all_lanes(
         carry: Carry, _step: None
     ) -> tuple[Carry, Float[Array, "envs"]]:
-        state, obs, env_key, sample_key = carry
+        state, obs, sample_key = carry
         sample_key, action_key = jax.random.split(sample_key)
         actions = default_actions if actor is None else actor(action_key, obs)
-        env_key, step_key = jax.random.split(env_key)
-        out = batched_step(state, actions, step_key, turbine, params)
-        return (out.state, out.obs, env_key, sample_key), out.reward
+        out = batched_step(state, actions, turbine, params)
+        return (out.state, out.obs, sample_key), out.reward
 
-    env_key, sample_key = jax.random.split(key)
-    (final_state, final_obs, _, _), rewards = jax.lax.scan(
-        advance_all_lanes, (state, obs, env_key, sample_key), None, length=n_steps
+    (final_state, final_obs, _), rewards = jax.lax.scan(
+        advance_all_lanes, (state, obs, key), None, length=n_steps
     )
     return final_state, final_obs, rewards
 
@@ -361,7 +358,6 @@ class BatchedWindFarmEnv:
         )
         self._state: EnvState | None = None
         self._obs: Observation | None = None
-        self._key: Key[Array, ""] = jax.random.key(0)
 
     def reset_fn(
         self, key: Key[Array, ""], layouts: PerEnvLayouts | None = None
@@ -382,15 +378,12 @@ class BatchedWindFarmEnv:
         )
 
     def step_fn(
-        self,
-        state: EnvState,
-        actions: Float[Array, "envs turbines"],
-        key: Key[Array, ""],
+        self, state: EnvState, actions: Float[Array, "envs turbines"]
     ) -> BatchedStepOut:
         """:func:`batched_step` under this env's compiled step."""
         return cast(
             BatchedStepOut,
-            _batched_step_jit(state, actions, key, self.turbine, self.params),
+            _batched_step_jit(state, actions, self.turbine, self.params),
         )
 
     def _batched_layout(self, layouts: PerEnvLayouts | None) -> PerEnvLayouts:
@@ -419,8 +412,7 @@ class BatchedWindFarmEnv:
         self, key: Key[Array, ""], layouts: PerEnvLayouts | None = None
     ) -> Observation:
         """Stateful ``reset_fn``: stashes the new state and returns the observation."""
-        reset_key, self._key = jax.random.split(key)
-        state, obs = self.reset_fn(reset_key, layouts)
+        state, obs = self.reset_fn(key, layouts)
         self._state, self._obs = state, obs
         return obs
 
@@ -431,8 +423,7 @@ class BatchedWindFarmEnv:
         have created."""
         if self._state is None:
             raise RuntimeError("call reset before step")
-        self._key, step_key = jax.random.split(self._key)
-        out = self.step_fn(self._state, actions, step_key)
+        out = self.step_fn(self._state, actions)
         self._state, self._obs = out.state, out.obs
         return out.obs, out.reward, out.truncated, out.extras
 
@@ -444,20 +435,20 @@ class BatchedWindFarmEnv:
     ) -> Float[Array, "steps envs"]:
         """Advance every lane ``n_steps`` steps as one fused ``lax.scan``.
 
-        ``actor`` maps ``(step key, observation) -> (envs, turbines)`` actions and
-        runs inside the scan, so it must be traceable; ``None`` is a do-nothing
-        policy (zero delta / discrete no-change). Returns per-step rewards and
-        leaves the env at the final state.
+        ``key`` seeds the per-step action keys; ``actor`` maps
+        ``(action key, observation) -> (envs, turbines)`` actions and runs inside
+        the scan, so it must be traceable; ``None`` is a do-nothing policy (zero
+        delta / discrete no-change). Returns per-step rewards and leaves the env
+        at the final state.
         """
         if self._state is None or self._obs is None:
             raise RuntimeError("call reset before rollout")
-        self._key, scan_key = jax.random.split(self._key)
         state, obs, rewards = cast(
             tuple[EnvState, Observation, Float[Array, "steps envs"]],
             _scan_rollout_jit(
                 self._state,
                 self._obs,
-                scan_key,
+                key,
                 self.turbine,
                 self.params,
                 n_steps=n_steps,

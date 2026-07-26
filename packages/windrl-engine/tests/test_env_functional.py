@@ -28,13 +28,13 @@ def _assert_trees_identical(left: Any, right: Any) -> None:
 
 
 def test_step_fn_is_pure(env3: BatchedWindFarmEnv) -> None:
-    # Same (state, actions, key) twice must give bitwise-identical pytrees, and
-    # neither call may touch the stateful shell's stashed state.
+    # Same (state, actions) twice must give bitwise-identical pytrees -- the step
+    # draws only from keys held in the state -- and neither call may touch the
+    # stateful shell's stashed state.
     state, _ = env3.reset_fn(jax.random.key(0))
-    step_key = jax.random.key(1)
 
-    first = env3.step_fn(state, _ACTIONS, step_key)
-    second = env3.step_fn(state, _ACTIONS, step_key)
+    first = env3.step_fn(state, _ACTIONS)
+    second = env3.step_fn(state, _ACTIONS)
 
     _assert_trees_identical(first, second)
     assert env3._state is None
@@ -58,20 +58,15 @@ def test_scan_matches_stateful() -> None:
         stateful_rewards.append(reward)
         stateful_truncated.append(truncated)
 
-    reset_key, chain_key = jax.random.split(key)
-    state, _ = env.reset_fn(reset_key)
-    step_keys = []
-    for _ in range(n_steps):
-        chain_key, step_key = jax.random.split(chain_key)
-        step_keys.append(step_key)
+    state, _ = env.reset_fn(key)
 
     def scan_step(
-        state: EnvState, step_key: jax.Array
+        state: EnvState, _step: None
     ) -> tuple[EnvState, tuple[jax.Array, jax.Array]]:
-        out = env.step_fn(state, _ACTIONS, step_key)
+        out = env.step_fn(state, _ACTIONS)
         return out.state, (out.reward, out.truncated)
 
-    _, (rewards, truncated) = jax.lax.scan(scan_step, state, jnp.stack(step_keys))
+    _, (rewards, truncated) = jax.lax.scan(scan_step, state, None, length=n_steps)
 
     assert rewards.shape == (n_steps, config.n_envs)
     assert bool(jnp.any(truncated))
@@ -102,13 +97,11 @@ def test_per_env_layouts_survive_autoreset() -> None:
     )
     state, _ = env.reset_fn(jax.random.key(0), layouts)
 
-    def scan_step(state: EnvState, step_key: jax.Array) -> tuple[EnvState, jax.Array]:
-        out = env.step_fn(state, jnp.zeros((2, 3)), step_key)
+    def scan_step(state: EnvState, _step: None) -> tuple[EnvState, jax.Array]:
+        out = env.step_fn(state, jnp.zeros((2, 3)))
         return out.state, out.truncated
 
-    state, truncated = jax.lax.scan(
-        scan_step, state, jax.random.split(jax.random.key(1), 4)
-    )
+    state, truncated = jax.lax.scan(scan_step, state, None, length=4)
 
     # step_count 1 -> 2, 2 -> 3 == horizon (truncate, reset to 1), then again.
     assert jnp.array_equal(truncated, jnp.asarray([[False] * 2, [True] * 2] * 2))

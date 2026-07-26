@@ -30,8 +30,10 @@ def _record(n_steps: int = 6, fidelity: Fidelity = "floris") -> EpisodeRecord:
     env = BatchedWindFarmEnv(
         WindFarmEnvConfig(layout="turb3_row1", n_envs=2, fidelity=fidelity)
     )
+    # The seed picks the episode's wind: this one blows along the row, so the
+    # turbines are genuinely waked and the two fidelities visibly disagree.
     return record_episode(
-        env, jax.random.key(0), n_steps, sweeping_actor(env.config.yaw_step)
+        env, jax.random.key(6), n_steps, sweeping_actor(env.config.yaw_step)
     )
 
 
@@ -105,7 +107,7 @@ def test_save_load_round_trips_every_field_exactly(
 def test_recorded_power_is_the_fidelity_the_env_was_rewarded_under(
     corrected_record: EpisodeRecord,
 ) -> None:
-    # "floris" and "corrected" differ by ~6 kW/turbine here, so recomputing the
+    # "floris" and "corrected" differ by ~10 kW/turbine here, so recomputing the
     # frame powers at the wrong fidelity is visible far above float32 noise.
     record = corrected_record
     env = BatchedWindFarmEnv(
@@ -125,7 +127,9 @@ def test_recorded_power_is_the_fidelity_the_env_was_rewarded_under(
         return np.asarray(turbine_powers(solution.u, yaw, turbine=env.turbine))
 
     assert record.fidelity == "corrected"
-    np.testing.assert_allclose(record.power[last], powers_at("corrected"), rtol=1e-6)
+    # The recorded powers come out of the env's jit(vmap) solve and this one is
+    # a single-farm re-solve, so they agree to reassociation noise, not exactly.
+    np.testing.assert_allclose(record.power[last], powers_at("corrected"), rtol=1e-5)
     assert np.abs(record.power[last] - powers_at("floris")).max() > 1e3
 
 

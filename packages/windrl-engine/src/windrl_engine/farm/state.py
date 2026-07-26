@@ -12,7 +12,7 @@ class FarmState(NamedTuple):
     yaw_accumulator: Float[Array, "turbines"]  # Σ|applied Δyaw| deg
     step_count: Int[Array, ""]  # WFCRL _num_iter; reset burn-in solve is step 1
     wind: WindCondition
-    key: Key[Array, ""]
+    key: Key[Array, ""]  # this farm's own stream; auto-reset redraws wind from it
 
 
 def make_state(
