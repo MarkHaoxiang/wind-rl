@@ -1,9 +1,9 @@
 from typing import NamedTuple
 
 import optax
-from jaxtyping import Array, Bool, Float, Int, Key
+from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
-from windrl_engine.env import EnvState, Observation
+from windrl_engine.env import BatchedStepOut, EnvState, Observation
 from windrl_train.nn import Actor, Critic
 
 
@@ -23,5 +23,19 @@ class LearnerState(NamedTuple):
     critic_opt: optax.OptState
     env_state: EnvState
     obs: Observation  # raw env obs (featurized at use)
-    key: Key[Array, ""]
+    key: PRNGKeyArray
     timestep: Int[Array, ""]  # env steps so far (envs * steps)
+
+    def update_on_env_step(
+        self, batched_step_out: BatchedStepOut, key: PRNGKeyArray
+    ) -> "LearnerState":
+        return LearnerState(
+            actor=self.actor,
+            critic=self.critic,
+            actor_opt=self.actor_opt,
+            critic_opt=self.critic_opt,
+            env_state=batched_step_out.state,
+            obs=batched_step_out.obs,
+            key=key,
+            timestep=self.timestep + batched_step_out.reward.shape[0],
+        )

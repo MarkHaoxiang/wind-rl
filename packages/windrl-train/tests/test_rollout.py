@@ -104,13 +104,18 @@ def test_rollout_log_prob_matches_recompute() -> None:
 
     _, traj = rollout.collect_rollout(state, env, n_steps)
 
+    # Tolerances accommodate TF32 matmuls inside the compiled rollout scan on
+    # GPU vs this eager recompute (~1e-4 relative observed); a genuine
+    # misalignment is O(1), orders of magnitude larger.
     for t, lane in ((0, 0), (n_steps - 1, N_ENVS - 1), (n_steps // 2, 0)):
         feats: Float[Array, "agents feat"] = traj.obs[t, lane]
         recomputed_log_prob = state.actor(feats).log_prob(traj.action[t, lane])
-        assert jnp.allclose(recomputed_log_prob, traj.log_prob[t, lane], atol=1e-5)
+        assert jnp.allclose(
+            recomputed_log_prob, traj.log_prob[t, lane], rtol=1e-3, atol=1e-4
+        )
 
         recomputed_value = state.critic(feats)
-        assert jnp.allclose(recomputed_value, traj.value[t, lane], atol=1e-5)
+        assert jnp.allclose(recomputed_value, traj.value[t, lane], rtol=1e-3, atol=1e-4)
 
 
 def test_rollout_crosses_autoreset() -> None:
@@ -121,9 +126,12 @@ def test_rollout_crosses_autoreset() -> None:
     _, traj = rollout.collect_rollout(state, env, n_steps)
 
     assert traj.done.shape == (n_steps, N_ENVS)
-    # Every lane starts a fresh episode at reset, so truncation lands on
-    # exactly the same step index (horizon - 1) across the whole batch.
-    truncation_step = HORIZON - 1
+    # Every lane starts a fresh episode at reset, so truncation lands on the
+    # same step index across the whole batch. The reset burn-in solve counts
+    # as step 1 (WFCRL _num_iter semantics; see the engine's
+    # test_step_truncates_on_the_horizon_minus_1th_agent_step), so an episode
+    # has horizon - 1 agent steps and truncates at scan index horizon - 2.
+    truncation_step = HORIZON - 2
     other_steps = jnp.arange(n_steps) != truncation_step
     assert bool(jnp.all(traj.done[truncation_step]))
     assert not bool(jnp.any(traj.done[other_steps]))
