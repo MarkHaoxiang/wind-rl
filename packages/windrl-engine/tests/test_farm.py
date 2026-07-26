@@ -11,7 +11,13 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 
 from windrl_engine.farm.layout import horns_rev2, row_layout
-from windrl_engine.farm.turbine import D, ct_lookup, nrel5mw_v4, power_lookup
+from windrl_engine.farm.turbine import (
+    POWER_SCALE,
+    D,
+    ct_lookup,
+    nrel5mw_v4,
+    power_lookup,
+)
 from windrl_engine.farm.wind import sample_wind
 
 N_WIND_SAMPLES = 20_000
@@ -105,10 +111,16 @@ def test_turbine_spec_matches_floris_yaml() -> None:
     assert spec.pP == table["cosine_loss_exponent_yaw"]
     assert spec.tsr == yml["TSR"]
     assert spec.ref_density == table["ref_air_density"]
-    assert (
-        spec.generator_efficiency
-        == table["controller_dependent_turbine_parameters"]["generator_efficiency"]
-    )
+
+
+def test_floris_yaml_still_makes_the_tilt_correction_a_no_op() -> None:
+    # physics/thrust.py drops the tilt term as unity, which only holds while
+    # nrel_5MW ships tilt correction off and its reference tilt matches the
+    # (constant) floating tilt table; flipping either upstream would silently
+    # break parity.
+    yml = _floris_nrel5mw_yaml()
+    assert yml["correct_cp_ct_for_tilt"] is False
+    assert yml["power_thrust_table"]["ref_tilt"] == 5.0
 
 
 def test_ct_lookup_matches_table_at_a_nonzero_node() -> None:
@@ -132,7 +144,7 @@ def test_ct_lookup_clips_out_of_range_to_fill() -> None:
 def test_power_lookup_scales_abs_kw_table_to_watts() -> None:
     spec = nrel5mw_v4()
     ws = jnp.asarray(spec.wind_speed_table[16])
-    expected = float(spec.power_table[16]) * spec.power_scale
+    expected = float(spec.power_table[16]) * POWER_SCALE
     assert float(power_lookup(spec, ws)) == pytest.approx(expected, rel=1e-9)
 
 

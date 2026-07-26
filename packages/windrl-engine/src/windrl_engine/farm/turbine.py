@@ -15,6 +15,12 @@ HUB_HEIGHT: Final = 90.0  # nominal NREL-5MW hub height for synthetic query grid
 
 TABLE_SIZE: Final = 54
 
+# FLORIS cosine-loss operation-model constants: code, not turbine data.
+POWER_SCALE: Final = 1e3  # the yaml power table is absolute kW
+CT_FILL: Final = 0.0001  # two-sided fill outside the wind-speed table
+CT_MIN: Final = 0.0001
+CT_MAX: Final = 0.9999
+
 if TYPE_CHECKING:
     # jaxtyping needs the bare `np.ndarray` class, off which mypy reads numpy's
     # `Any`-defaulted type parameters -- rejected by `disallow_any_explicit`.
@@ -26,9 +32,8 @@ else:
 class TurbineSpec(NamedTuple):
     """Turbine geometry and power/thrust tables as a PyTree (single shared spec).
 
-    Electrical power is one interpolation of the absolute-kW ``power_table``
-    scaled by ``power_scale`` (1e3 -> W). ``ct_fill_low``/``ct_fill_high`` are the
-    fill values applied to ``C_t`` outside the wind-speed table before the clip.
+    Every field is a value ``nrel_5MW.yaml`` supplies; the operation model's own
+    constants live beside the lookups below.
 
     Tables stay numpy float64 so their JAX dtype resolves at trace time under
     whatever ``jax_enable_x64`` is then active, instead of being frozen by the
@@ -39,14 +44,10 @@ class TurbineSpec(NamedTuple):
     hub_height: float
     pP: float
     tsr: float
-    generator_efficiency: float
     ref_density: float
     wind_speed_table: TurbineTable
     thrust_table: TurbineTable
     power_table: TurbineTable
-    power_scale: float
-    ct_fill_low: float
-    ct_fill_high: float
 
 
 def _floris_turbine_library() -> Path:
@@ -67,16 +68,10 @@ def _load_nrel5mw_v4() -> TurbineSpec:
         hub_height=float(turbine["hub_height"]),
         pP=float(table["cosine_loss_exponent_yaw"]),
         tsr=float(turbine["TSR"]),
-        generator_efficiency=float(
-            table["controller_dependent_turbine_parameters"]["generator_efficiency"]
-        ),
         ref_density=float(table["ref_air_density"]),
         wind_speed_table=np.asarray(table["wind_speed"], dtype=np.float64),
         thrust_table=np.asarray(table["thrust_coefficient"], dtype=np.float64),
         power_table=np.asarray(table["power"], dtype=np.float64),
-        power_scale=1e3,
-        ct_fill_low=0.0001,
-        ct_fill_high=0.0001,
     )
 
 
@@ -94,9 +89,9 @@ def ct_lookup(
     """Thrust coefficient C_t for ``spec``; linear interp, fill, then clip to (1e-4, 0.9999)."""
     ws = spec.wind_speed_table
     ct = jnp.interp(wind_speed, ws, spec.thrust_table)
-    ct = jnp.where(wind_speed < ws[0], spec.ct_fill_low, ct)
-    ct = jnp.where(wind_speed > ws[-1], spec.ct_fill_high, ct)
-    return jnp.clip(ct, 0.0001, 0.9999)
+    ct = jnp.where(wind_speed < ws[0], CT_FILL, ct)
+    ct = jnp.where(wind_speed > ws[-1], CT_FILL, ct)
+    return jnp.clip(ct, CT_MIN, CT_MAX)
 
 
 def power_lookup(
@@ -107,4 +102,4 @@ def power_lookup(
     power = jnp.interp(u_eff, ws, spec.power_table)
     power = jnp.where(u_eff < ws[0], 0.0, power)
     power = jnp.where(u_eff > ws[-1], 0.0, power)
-    return power * spec.power_scale
+    return power * POWER_SCALE
