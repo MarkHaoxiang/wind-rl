@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec
 from windrl_engine.physics.flow import AMBIENT_TI
 from windrl_engine.physics.frame import GRID, RotorField, RotorPlane, Scalar
+from windrl_engine.physics.thrust import cubic_mean
 
 CRESPO_INITIAL: Final = 0.1
 CRESPO_CONSTANT: Final = 0.5
@@ -45,7 +46,7 @@ def yaw_added_mixing(
 ) -> Scalar:
     """Turbulence-intensity increment from yaw-induced spanwise/vertical mixing."""
     ti_ambient = ti_i[0, 0]
-    rotor_speed = jnp.cbrt(jnp.mean(u_i**3))
+    rotor_speed = cubic_mean(u_i)
     k = (rotor_speed * ti_ambient) ** 2 / (2 / 3)
     u_term = jnp.sqrt(2 * k)
     v_term = jnp.mean(v_i + turb_v_i)

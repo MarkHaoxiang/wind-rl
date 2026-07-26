@@ -1,11 +1,14 @@
 import jax.numpy as jnp
+from jaxtyping import Array, Float
 
 from windrl_engine.farm.turbine import DEFAULT_TURBINE, TurbineSpec, ct_lookup
 from windrl_engine.physics.frame import Scalar, cosd
 
 
-def cubic_mean(velocities: jnp.ndarray) -> jnp.ndarray:
-    """Cube root of the mean cubed velocity over the rotor plane (last two axes)."""
+def cubic_mean(
+    velocities: Float[Array, "*batch grid grid"],
+) -> Float[Array, "*batch"]:
+    """Cube root of the mean cubed velocity over a rotor plane."""
     return jnp.cbrt(jnp.mean(velocities**3, axis=(-2, -1)))
 
 

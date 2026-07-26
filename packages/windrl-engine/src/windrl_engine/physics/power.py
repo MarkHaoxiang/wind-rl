@@ -6,6 +6,7 @@ from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.flow import AIR_DENSITY
 from windrl_engine.physics.frame import cosd
 from windrl_engine.physics.solver import FlowSolution
+from windrl_engine.physics.thrust import cubic_mean
 
 
 def turbine_powers(
@@ -15,7 +16,7 @@ def turbine_powers(
     turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> Float[Array, "turbines"]:
     """Per-turbine electrical power (W) from the cubic-mean rotor velocity."""
-    rotor_speed = jnp.cbrt(jnp.mean(u**3, axis=(1, 2)))
+    rotor_speed = cubic_mean(u)
     u_eff = (AIR_DENSITY / turbine.ref_density) ** (1 / 3) * rotor_speed
     u_eff = u_eff * cosd(yaw) ** (turbine.pP / 3)
     return power_lookup(turbine, u_eff)
@@ -38,7 +39,7 @@ def local_wind(
     solution: FlowSolution, wind: WindCondition
 ) -> tuple[Float[Array, "turbines"], Float[Array, "turbines"]]:
     """Per-turbine local speed ∛(mean u³) and inflow direction (deg)."""
-    speed = jnp.cbrt(jnp.mean(solution.u**3, axis=(1, 2)))
+    speed = cubic_mean(solution.u)
     direction = jnp.mean(
         wind.direction - jnp.rad2deg(jnp.arctan2(solution.v, solution.u)), axis=(1, 2)
     )
