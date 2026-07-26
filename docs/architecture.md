@@ -73,6 +73,9 @@ rewritten in-repo.
   `distrax.Transformed` Normal squashed through tanh and scaled to
   `[-action_scale, action_scale]`), `critic.py` (`Critic`, a per-agent
   state-value head).
+- `algo/ppo/`: IPPO scaffolding — `config.py` (`IPPOConfig`), `types.py`
+  (`Transition`, `LearnerState` pytrees), `featurize.py` (`agent_features`,
+  the raw `Observation` -> `NFEAT`-wide per-agent feature vector).
 
 ## Outputs
 
