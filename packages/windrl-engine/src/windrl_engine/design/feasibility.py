@@ -51,10 +51,13 @@ def in_bounds(coords: Float[Array, "turbines 2"], site: SiteSpec) -> Bool[Array,
     )
 
 
+DEFAULT_PROJECTION_ITERS = 200
+
+
 def project_feasible(
     coords: Float[Array, "turbines 2"],
     site: SiteSpec,
-    iters: int = 200,
+    iters: int = DEFAULT_PROJECTION_ITERS,
     tol: float = 1e-3,
 ) -> Float[Array, "turbines 2"]:
     """Push `coords` toward the feasible set: pairwise repulsion then bounds clip.

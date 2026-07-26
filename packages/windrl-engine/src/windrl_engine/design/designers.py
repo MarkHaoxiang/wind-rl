@@ -13,7 +13,11 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, Key
 
 from windrl_engine.design.base import Designer
-from windrl_engine.design.feasibility import SiteSpec, project_feasible
+from windrl_engine.design.feasibility import (
+    DEFAULT_PROJECTION_ITERS,
+    SiteSpec,
+    project_feasible,
+)
 from windrl_engine.farm.layout import FarmLayout
 
 
@@ -29,7 +33,9 @@ def fixed(layout: FarmLayout) -> Designer:
     return designer
 
 
-def random_uniform(site: SiteSpec, n_turbines: int, iters: int = 200) -> Designer:
+def random_uniform(
+    site: SiteSpec, n_turbines: int, iters: int = DEFAULT_PROJECTION_ITERS
+) -> Designer:
     def designer(
         key: Key[Array, ""], batch_size: int
     ) -> Float[Array, "batch turbines 2"]:
