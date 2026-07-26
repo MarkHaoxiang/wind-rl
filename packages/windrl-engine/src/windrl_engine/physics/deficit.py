@@ -25,6 +25,8 @@ def _gaussian_deficit_terms(
     yaw: Scalar,
     turbine: TurbineSpec,
 ) -> tuple[QueryField, QueryField]:
+    # FLORIS's rC() weights a and c by cos^2/sin^2(wind_veer) and carries a
+    # -2b*dy*dz cross term; all of it collapses to this at the default wind_veer = 0.
     a = 1.0 / (2.0 * sigma_y**2)
     c = 1.0 / (2.0 * sigma_z**2)
     r_squared = a * (y - y_i - deflection) ** 2 + c * (z - turbine.hub_height) ** 2
@@ -55,12 +57,17 @@ def deficit_field(
     D = turbine.rotor_diameter
     yaw = -1.0 * yaw_i
 
+    # No cosd(yaw) here: FLORIS's velocity gauss omits the factor its deflection
+    # gauss applies to uR (with a hardcoded cosd(tilt) = 1). Upstream asymmetry.
     uR = u_initial * ct_i / (2.0 * (1.0 - jnp.sqrt(1.0 - ct_i)))
     u0 = u_initial * jnp.sqrt(1.0 - ct_i)
     sigma_z0 = D * 0.5 * jnp.sqrt(uR / (u_initial + u0))
+    # FLORIS also multiplies by cosd(wind_veer), unity at the default wind_veer = 0.
     sigma_y0 = sigma_z0 * cosd(yaw)
 
     xR = x_i
+    # sqrt(1 - ct) in this numerator, where the deflection model uses
+    # sqrt(1 - ct*cosd(yaw)); the two FLORIS gauss models genuinely differ here.
     x0 = (
         D
         * cosd(yaw)
@@ -83,6 +90,8 @@ def deficit_field(
     r_squared_near, amplitude_near = _gaussian_deficit_terms(
         sigma_y_near, sigma_z_near, y, y_i, deflection, z, ct_i, yaw, turbine
     )
+    # FLORIS's gaussian_function divides r_squared by 2*sqrt(0.5)**2, which evaluates
+    # to 1.0000000000000002; that 1-ULP infidelity is ~1e-15 relative in u.
     near_deficit = amplitude_near * jnp.exp(-r_squared_near) * near_mask
 
     ky = KA * ti_i + KB

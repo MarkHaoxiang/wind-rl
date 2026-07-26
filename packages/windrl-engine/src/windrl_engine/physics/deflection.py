@@ -64,6 +64,7 @@ def deflection_field(
     E0 = C0**2 - 3.0 * math.exp(1.0 / 12.0) * C0 + 3.0 * math.exp(1.0 / 3.0)
 
     sigma_z0 = D * 0.5 * jnp.sqrt(uR / (freestream_velocity + u0))
+    # FLORIS also multiplies by cosd(wind_veer), unity at the default wind_veer = 0.
     sigma_y0 = sigma_z0 * cosd(yaw)
 
     xR = x_i
@@ -74,6 +75,8 @@ def deflection_field(
     )
     delta0 = jnp.tan(theta_c0) * (x0 - x_i)
 
+    # FLORIS adds + (ad + bd*(x - x_i)) to both the near and the far deflection;
+    # ad and bd are 0.0 in default_inputs.yaml.
     delta_near = ((x - xR) / (x0 - xR)) * delta0
     delta_near = delta_near * ((x >= xR) & (x <= x0))
 
