@@ -17,7 +17,7 @@ from windrl_engine.env.env import (
     step,
     wfcrl_reward,
 )
-from windrl_engine.env.spaces import Box, MultiDiscrete, Space
+from windrl_engine.env.spaces import Box, MultiDiscrete
 
 __all__ = [
     "Actor",
@@ -30,7 +30,6 @@ __all__ = [
     "Observation",
     "PerEnvLayouts",
     "RewardFn",
-    "Space",
     "WindFarmEnvConfig",
     "apply_action",
     "command_from_action",

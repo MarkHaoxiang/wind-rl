@@ -17,6 +17,7 @@ from windrl_engine.env.env import (
     WIND_DIRECTION_MAX,
     WIND_SPEED_MAX,
     BatchedWindFarmEnv,
+    Observation,
     reset,
     step,
     wfcrl_reward,
@@ -179,6 +180,12 @@ def test_step_truncates_on_the_horizon_minus_1th_agent_step() -> None:
         )
         assert bool(truncated) == expected
     assert int(state.step_count) == horizon
+
+
+def test_observation_space_keys_match_observation_fields() -> None:
+    config = WindFarmEnvConfig(layout=[(0.0, 0.0), (504.0, 0.0)])
+    env = BatchedWindFarmEnv(config)
+    assert set(env.observation_space()) == set(Observation._fields)
 
 
 def test_observation_space_freewind_bounds_match_the_actual_clipping() -> None:
