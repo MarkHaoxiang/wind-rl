@@ -7,9 +7,9 @@ shipped package (the hook only exists in the test session). It must be
 installed before those modules are first imported, so this lives in the
 top-level conftest, which pytest loads before any test module.
 
-``env`` / ``analysis`` are excluded: they execute the same un-batched aliases
-batched under ``vmap`` (``BatchedWindFarmEnv``, rose evaluation), which needs a
-separate batched -> single-farm re-annotation pass first.
+``env`` is excluded: it executes the same un-batched aliases batched under
+``vmap`` (``BatchedWindFarmEnv``), which needs a separate batched ->
+single-farm re-annotation pass first.
 """
 
 import jax
@@ -39,6 +39,7 @@ install_import_hook(
         "windrl_engine.design.base",
         "windrl_engine.design.designers",
         "windrl_engine.design.feasibility",
+        "windrl_engine.metrics",
     ],
     "beartype.beartype",
 )

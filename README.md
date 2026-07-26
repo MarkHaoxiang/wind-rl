@@ -9,7 +9,7 @@ setup (Li, Amir, Prorok, arXiv:2511.03100) toward real 32/64/92-turbine farms.
 pyproject.toml            # virtual uv workspace root: tooling + dependency groups only
 packages/
   windrl-engine/          # pure-JAX wind-farm simulator (WFCRL/FLORIS GCH reimplementation)
-    src/windrl_engine/    #   farm -> physics -> env (+ design, analysis)
+    src/windrl_engine/    #   farm -> physics -> env (+ design, metrics, viz)
   windrl-train/           # experiment harness (RL trainer being rewritten in-repo)
     src/windrl_train/
       config.py             #   pydantic Config base (extra="forbid")

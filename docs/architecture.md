@@ -20,8 +20,8 @@ From-scratch JAX reimplementation of the WFCRL/FLORIS GCH wake model,
 verified live to ~1e-13 against FLORIS 4.6.6 (a pinned runtime dependency;
 WFCRL is not);
 pure-functional (`NamedTuple` PyTrees, single-farm cores, batched via
-`jit(vmap)`), layered `farm` -> `physics` -> `env` (plus `design` and
-`analysis`), each layer importing only from lower ones.
+`jit(vmap)`), layered `farm` -> `physics` -> `env` (plus `design`, `metrics`
+and `viz`), each layer importing only from lower ones.
 
 - `farm/`: `turbine.py` (`TurbineSpec`, NREL-5MW read from FLORIS's packaged
   `nrel_5MW.yaml` at import via `farm/floris_tables.py`), `layout.py`
@@ -32,7 +32,8 @@ pure-functional (`NamedTuple` PyTrees, single-farm cores, batched via
   `deflection`, `transverse`, `deficit`, `turbulence`, `power`) composed by
   `solver.py`'s sequential upstream-to-downstream solve, with a
   `fidelity="floris"|"corrected"` flag choosing whether to reproduce or fix
-  the reference's numerical quirks.
+  the reference's numerical quirks; `query_field.py` re-casts a converged
+  solution onto arbitrary query points (the full-flow field pass).
 - `env/`: WFCRL-compatible MARL env (delta-yaw actions, duty-cycle limiter,
   reward) — `spaces.py`, `actions.py`, `config.py` (`WindFarmEnvConfig`),
   `env.py` (`BatchedWindFarmEnv` with per-env layouts and auto-reset, exposing a
@@ -42,11 +43,12 @@ pure-functional (`NamedTuple` PyTrees, single-farm cores, batched via
 - `design/`: `Designer` type alias (a pure `(key, batch) -> layouts` callable,
   no `Protocol` — current designers are stateless closures), `SiteSpec`,
   `project_feasible` min-spacing projection, random/grid designers.
-- `analysis/`: `flow_viz.py`, `metrics.py` (wind-rose power).
-- `viz/`: episode replay — `record.py` (`EpisodeRecord` + `.npz` save/load and
-  the recorder), `field.py` (per-frame hub-height wake fields, cached),
-  `server.py` + `app.html` (stdlib HTTP server and the bundled canvas viewer,
-  run via `python -m windrl_engine.viz episode.npz`).
+- `metrics.py`: rose-weighted power surface, AEP and wake loss.
+- `viz/`: episode replay and flow pictures — `record.py` (`EpisodeRecord` +
+  `.npz` save/load and the recorder), `plane.py` (horizontal/vertical slice
+  framing over `physics.query_field`), `field.py` (per-frame hub-height wake
+  fields, LRU-cached), `server.py` + `app.html` (stdlib HTTP server and the
+  bundled canvas viewer, run via `python -m windrl_engine.viz episode.npz`).
 - `tests/`: live parity against FLORIS 4.6.6, physics invariants, and a
   beartype import hook that makes jaxtyping shape annotations
   runtime-checked.

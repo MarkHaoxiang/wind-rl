@@ -1,10 +1,10 @@
-"""analysis/metrics.py: wind-rose power, AEP and wake loss."""
+"""metrics.py: wind-rose power surface, AEP and wake loss."""
 
 import jax.numpy as jnp
 
-from windrl_engine.analysis.metrics import HOURS_PER_YEAR, aep, power_surface, wake_loss
 from windrl_engine.farm.layout import FarmLayout, row_layout
 from windrl_engine.farm.wind import WindRose, make_wind_rose
+from windrl_engine.metrics import HOURS_PER_YEAR, aep, power_surface, wake_loss
 
 
 def _rose() -> WindRose:

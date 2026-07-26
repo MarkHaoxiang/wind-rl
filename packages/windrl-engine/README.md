@@ -2,7 +2,7 @@
 
 A JAX reimplementation of the WFCRL/FLORIS GCH wake model. `farm/` describes a
 site (layouts, turbine spec, wind), `physics/` solves the flow, `env/` wraps it
-as an RL environment, `analysis/` and `viz/` inspect the result.
+as an RL environment, `metrics.py` and `viz/` inspect the result.
 
 ## Precision
 
