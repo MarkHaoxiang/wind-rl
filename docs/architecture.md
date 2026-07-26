@@ -39,9 +39,10 @@ from lower ones.
 - `env/`: WFCRL-compatible MARL env (delta-yaw actions, duty-cycle limiter,
   reward) — `spaces.py`, `actions.py`, `config.py` (`WindFarmEnvConfig`),
   `reward.py` (`RewardFn` and the default `WfcrlReward`), `single_farm.py`
-  (one farm's `reset`/`step`, its `Observation`, and the hashable `EnvParams`
-  every static knob rides in), `batched.py` (`BatchedWindFarmEnv` with per-env
-  layouts and auto-reset, wrapping the pure `lax.scan`-safe
+  (the only definition of the dynamics — one farm's `reset`/`step`/`auto_reset`,
+  its `Observation`, and the hashable `EnvParams` every static knob rides in),
+  `batched.py` (`BatchedWindFarmEnv` with per-env layouts, adding the env axis
+  by `vmap`ping that core inside the pure `lax.scan`-safe
   `batched_reset`/`batched_step` over an `EnvState`; each step also returns the
   pre-auto-reset observation and per-turbine powers as `StepExtras`).
 - `design/`: `Designer`, a `@runtime_checkable` `Protocol` for a pure

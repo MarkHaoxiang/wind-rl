@@ -19,6 +19,7 @@ from windrl_engine.env.single_farm import (
     EnvParams,
     Observation,
     StepOut,
+    auto_reset,
     reset,
     step,
 )
@@ -64,21 +65,6 @@ class BatchedStepOut(NamedTuple):
     extras: StepExtras
 
 
-def _where_env(
-    mask: Bool[Array, "envs"], true_value: Array, false_value: Array
-) -> Array:
-    mask_broadcast = mask.reshape((mask.shape[0],) + (1,) * (true_value.ndim - 1))
-    return jnp.where(mask_broadcast, true_value, false_value)
-
-
-def _tree_where_env[T](mask: Bool[Array, "envs"], true_tree: T, false_tree: T) -> T:
-    # jnp.where handles typed PRNG key leaves natively, so no per-dtype branch.
-    return cast(
-        T,
-        jax.tree.map(lambda a, b: _where_env(mask, a, b), true_tree, false_tree),
-    )
-
-
 def batched_step(
     state: EnvState,
     actions: Float[Array, "envs turbines"],
@@ -96,42 +82,24 @@ def batched_step(
     ) -> StepOut:
         return step(layout, farm, action, params, turbine=turbine)
 
+    def continue_one_farm(
+        layout: FarmLayout, out: StepOut
+    ) -> tuple[FarmState, Observation]:
+        return auto_reset(layout, out, params, turbine=turbine)
+
     stepped = jax.vmap(step_one_farm)(state.layout, state.farm, actions)
-    truncated = stepped.truncated
-
-    def do_reset(
-        operand: tuple[FarmState, Observation],
-    ) -> tuple[FarmState, Observation]:
-        current_farm, current_obs = operand
-
-        def reset_one_farm(
-            layout: FarmLayout, farm: FarmState
-        ) -> tuple[FarmState, Observation]:
-            # Each env advances its own stream, so the draws stay independent
-            # (and shard with the env) instead of fanning out of a host key.
-            return reset(layout, farm.key, fidelity=params.fidelity, turbine=turbine)
-
-        fresh_farm, fresh_obs = jax.vmap(reset_one_farm)(state.layout, current_farm)
-        return _tree_where_env(
-            truncated, (fresh_farm, fresh_obs), (current_farm, current_obs)
-        )
-
-    def no_reset(
-        operand: tuple[FarmState, Observation],
-    ) -> tuple[FarmState, Observation]:
-        return operand
-
-    farm, obs = cast(
-        tuple[FarmState, Observation],
-        jax.lax.cond(
-            jnp.any(truncated), do_reset, no_reset, (stepped.state, stepped.obs)
-        ),
+    # The batch shares one horizon, so its envs truncate together: gating on
+    # ``any`` skips a whole farm solve per env on the steps in between.
+    farm, obs = jax.lax.cond(
+        jnp.any(stepped.truncated),
+        lambda: jax.vmap(continue_one_farm)(state.layout, stepped),
+        lambda: (stepped.state, stepped.obs),
     )
     return BatchedStepOut(
         state=EnvState(farm=farm, layout=state.layout),
         obs=obs,
         reward=stepped.reward,
-        truncated=truncated,
+        truncated=stepped.truncated,
         extras=StepExtras(terminal_obs=stepped.obs, powers=stepped.powers),
     )
 

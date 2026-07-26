@@ -1,7 +1,7 @@
 """One farm's reset/step: the un-batched env core the batched layer vmaps."""
 
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -126,3 +126,28 @@ def step(
     reward = params.reward_fn(powers, loads, freestream_speed)
     truncated = step_count == params.horizon
     return StepOut(new_state, obs, reward, truncated, powers)
+
+
+def auto_reset(
+    layout: FarmLayout,
+    out: StepOut,
+    params: EnvParams,
+    *,
+    turbine: TurbineSpec = DEFAULT_TURBINE,
+) -> tuple[FarmState, Observation]:
+    """``out``'s state and observation, or a fresh episode's if ``out`` truncated.
+
+    The farm keeps its layout across the boundary and redraws only its wind, from
+    the key it carries — so the caller need not feed one in, and each farm's
+    stream stays its own under ``vmap``.
+    """
+    fresh = reset(layout, out.state.key, fidelity=params.fidelity, turbine=turbine)
+    return cast(
+        tuple[FarmState, Observation],
+        # jnp.where handles typed PRNG key leaves natively, so no per-dtype branch.
+        jax.tree.map(
+            lambda new, old: jnp.where(out.truncated, new, old),
+            fresh,
+            (out.state, out.obs),
+        ),
+    )
