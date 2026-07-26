@@ -14,9 +14,12 @@ def _rose() -> WindRose:
 
 
 def test_power_surface_shape_is_directions_by_speeds_by_turbines() -> None:
-    layout = row_layout(2)
-    powers = power_surface(layout, _rose(), jnp.zeros(2))
-    assert powers.shape == (3, 2, 2)
+    # All three dims distinct: the rose's 3 directions x 2 speeds against 4
+    # turbines. With a 2-turbine layout the speed and turbine axes are both 2,
+    # so a swapped nesting of the two vmaps produced the expected shape anyway.
+    layout = row_layout(4)
+    powers = power_surface(layout, _rose(), jnp.zeros(4))
+    assert powers.shape == (3, 2, 4)
 
 
 def test_make_wind_rose_normalizes_frequency_to_sum_to_one() -> None:

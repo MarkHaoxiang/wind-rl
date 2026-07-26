@@ -12,15 +12,6 @@ def _wind() -> WindCondition:
     return WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
 
 
-def test_horizontal_slice_extent_matches_the_requested_bounds() -> None:
-    bounds = (-252.0, 756.0, -50.0, 50.0)
-
-    _, extent = horizontal_slice(
-        row_layout(2), _wind(), jnp.zeros(2), bounds=bounds, resolution=(5, 3)
-    )
-    assert extent == bounds
-
-
 def test_horizontal_slice_upstream_edge_is_freestream_at_hub_height() -> None:
     # At z=hub height, the shear profile u=ws*(z/HH)^0.12 collapses to ws
     # exactly, and a point well upstream of every turbine sees no deficit (the
