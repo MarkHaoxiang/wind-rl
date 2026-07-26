@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, Key
 
 from windrl_engine.env import BatchedWindFarmEnv, EnvState, Observation
-from windrl_train.algo.ppo.featurize import agent_features
+from windrl_train.features import agent_features
 from windrl_train.nn import Actor
 
 

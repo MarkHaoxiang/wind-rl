@@ -2,8 +2,8 @@ import jax
 import jax.numpy as jnp
 
 from windrl_engine.env import BatchedWindFarmEnv, WindFarmEnvConfig
-from windrl_train.algo.ppo.featurize import NFEAT
 from windrl_train.eval.evaluator import evaluate
+from windrl_train.features import NFEAT
 from windrl_train.nn import Actor
 
 N_STEPS = 12  # crosses horizon=8 at least once, forcing an auto-reset mid-eval

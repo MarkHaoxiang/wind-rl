@@ -6,8 +6,8 @@ import pytest
 from jaxtyping import Array, Float
 
 from windrl_engine.env import BatchedWindFarmEnv, WindFarmEnvConfig
-from windrl_train.algo.ppo.featurize import NFEAT
 from windrl_train.algo.ppo.types import LearnerState, Transition
+from windrl_train.features import NFEAT
 from windrl_train.nn import Actor, Critic
 
 # rollout.py is the owner's hand-written learning exercise; this file must

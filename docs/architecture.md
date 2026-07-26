@@ -79,9 +79,11 @@ rewritten in-repo.
   `distrax.Transformed` Normal squashed through tanh and scaled to
   `[-action_scale, action_scale]`), `critic.py` (`Critic`, a per-agent
   state-value head).
+- `features.py`: `agent_features`, the raw `Observation` -> `NFEAT`-wide
+  per-agent feature vector, shared across the algorithm ladder (not
+  PPO-specific).
 - `algo/ppo/`: IPPO scaffolding — `config.py` (`IPPOConfig`), `types.py`
-  (`Transition`, `LearnerState` pytrees), `featurize.py` (`agent_features`,
-  the raw `Observation` -> `NFEAT`-wide per-agent feature vector).
+  (`Transition`, `LearnerState` pytrees).
 - `eval/`: `evaluator.py` (`evaluate`, a jitted fresh-reset deterministic
   rollout under `actor.mode` scoring `eval/mean_reward` for the runner to log).
 
