@@ -55,10 +55,10 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 # Third-party packages that ship no py.typed, so imports from them are untyped.
-# floris is a real runtime dependency of windrl-engine; wandb still ships no
-# typing.
+# floris is a real runtime dependency of windrl-engine; wandb and distrax still
+# ship no typing.
 [[tool.mypy.overrides]]
-module = ["wandb.*", "floris.*"]
+module = ["wandb.*", "floris.*", "distrax.*"]
 ignore_missing_imports = true
 
 # The Logger protocol's log_config carries an arbitrary experiment config, so

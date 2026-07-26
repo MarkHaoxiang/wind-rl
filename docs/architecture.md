@@ -67,6 +67,12 @@ rewritten in-repo.
 - `logging/`: `Logger` protocol (`log_stat`/`log_config`/`stop`) plus its
   `wandb`/`console`/`null` implementations, so trainer code never imports
   wandb directly.
+- `nn/`: equinox network modules for the PPO trainer — `mlp.py` (`MLP`, a
+  trailing-axis feedforward net so `(envs, agents, feat)` batches need no
+  vmap), `actor.py` (`Actor`, a per-agent scalar delta-yaw policy: a
+  `distrax.Transformed` Normal squashed through tanh and scaled to
+  `[-action_scale, action_scale]`), `critic.py` (`Critic`, a per-agent
+  state-value head).
 
 ## Outputs
 

@@ -12,6 +12,9 @@ dependencies = [
     "pydantic>=2",
     "pydantic-settings>=2",
     "wandb>=0.20",
+    "equinox>=0.13",
+    "distrax>=0.1.5",
+    "optax>=0.2.8",
 ]
 
 [build-system]
