@@ -17,10 +17,11 @@ from windrl_engine.env.env import (
     WIND_DIRECTION_MAX,
     WIND_SPEED_MAX,
     BatchedWindFarmEnv,
+    EnvParams,
     Observation,
+    WfcrlReward,
     reset,
     step,
-    wfcrl_reward,
 )
 from windrl_engine.farm.layout import ablaincourt, row_layout, turb3_row1
 from windrl_engine.farm.wind import WindCondition
@@ -174,9 +175,7 @@ def test_step_truncates_on_the_horizon_minus_1th_agent_step() -> None:
             layout,
             state,
             jnp.zeros(2),
-            yaw_step=5.0,
-            reward_fn=wfcrl_reward(0.1),
-            horizon=horizon,
+            EnvParams(yaw_step=5.0, reward_fn=WfcrlReward(0.1), horizon=horizon),
         )
         assert bool(truncated) == expected
     assert int(state.step_count) == horizon
@@ -224,7 +223,7 @@ def test_wfcrl_reward_is_mean_kw_per_cubed_freestream_minus_the_load_penalty() -
     loads = load_proxies(solution)
 
     unpenalized = jnp.mean(powers / 1e3) / wind.speed**3
-    assert float(wfcrl_reward(0.0)(powers, loads, wind.speed)) == float(unpenalized)
+    assert float(WfcrlReward(0.0)(powers, loads, wind.speed)) == float(unpenalized)
 
     penalized = unpenalized - 0.1 * jnp.mean(jnp.abs(loads))
-    assert float(wfcrl_reward(0.1)(powers, loads, wind.speed)) == float(penalized)
+    assert float(WfcrlReward(0.1)(powers, loads, wind.speed)) == float(penalized)

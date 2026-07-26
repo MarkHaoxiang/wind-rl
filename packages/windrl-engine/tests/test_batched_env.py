@@ -1,5 +1,7 @@
 """BatchedWindFarmEnv behavior, checked against the single-farm reset/step core."""
 
+from dataclasses import replace
+
 import jax
 import jax.numpy as jnp
 import pytest
@@ -7,10 +9,12 @@ import pytest
 from windrl_engine.env.config import WindFarmEnvConfig
 from windrl_engine.env.env import (
     BatchedWindFarmEnv,
+    EnvParams,
     Observation,
+    WfcrlReward,
+    _batched_step_jit,
     reset,
     step,
-    wfcrl_reward,
 )
 from windrl_engine.env.spaces import Box, MultiDiscrete
 from windrl_engine.farm.layout import FarmLayout
@@ -70,12 +74,7 @@ def test_batched_step_matches_stacked_single_farm_step_calls() -> None:
 
     for i, lane_state in enumerate(lane_states):
         _, expected_obs, expected_reward, expected_truncated = step(
-            env.layout,
-            lane_state,
-            actions[i],
-            yaw_step=env.config.yaw_step,
-            reward_fn=env.reward_fn,
-            horizon=env.config.horizon,
+            env.layout, lane_state, actions[i], env.params
         )
         assert jnp.allclose(obs.yaw[i], expected_obs.yaw, atol=1e-9)
         assert jnp.allclose(obs.freewind[i], expected_obs.freewind, atol=1e-9)
@@ -94,27 +93,20 @@ def test_injected_reward_fn_changes_only_the_reward_value() -> None:
     def negated_reward(
         powers_watts: jax.Array, loads: jax.Array, freestream_speed: jax.Array
     ) -> jax.Array:
-        return -default_env.reward_fn(powers_watts, loads, freestream_speed)
+        return -default_env.params.reward_fn(powers_watts, loads, freestream_speed)
 
     key = jax.random.key(9)
     action = jnp.asarray([3.0, -2.0])
 
     state, _ = reset(default_env.layout, key)
     default_state, default_obs, default_reward, default_truncated = step(
-        default_env.layout,
-        state,
-        action,
-        yaw_step=config.yaw_step,
-        reward_fn=default_env.reward_fn,
-        horizon=config.horizon,
+        default_env.layout, state, action, default_env.params
     )
     custom_state, custom_obs, custom_reward, custom_truncated = step(
         default_env.layout,
         state,
         action,
-        yaw_step=config.yaw_step,
-        reward_fn=negated_reward,
-        horizon=config.horizon,
+        replace(default_env.params, reward_fn=negated_reward),
     )
     assert jnp.array_equal(default_state.yaw, custom_state.yaw)
     assert jnp.array_equal(default_obs.yaw, custom_obs.yaw)
@@ -132,6 +124,26 @@ def test_injected_reward_fn_changes_only_the_reward_value() -> None:
     assert jnp.array_equal(default_obs_b.yaw, custom_obs_b.yaw)
     assert jnp.array_equal(default_trunc_b, custom_trunc_b)
     assert jnp.allclose(custom_reward_b, -default_reward_b, atol=1e-9)
+
+
+def test_identically_configured_envs_reuse_one_compiled_step() -> None:
+    # EnvParams is the whole static-argument set, so it has to compare by value
+    # down to the reward -- a fresh reward closure per env would silently cost a
+    # full retrace of the batched step for every env a sweep constructs.
+    config = WindFarmEnvConfig(layout=_LAYOUT, n_envs=2, horizon=50)
+    actions = jnp.zeros((2, 2))
+
+    first = BatchedWindFarmEnv(config)
+    first.reset(jax.random.key(0))
+    first.step(actions)
+    compiled = _batched_step_jit._cache_size()
+
+    second = BatchedWindFarmEnv(config)
+    second.reset(jax.random.key(0))
+    second.step(actions)
+
+    assert second.params == first.params
+    assert _batched_step_jit._cache_size() == compiled
 
 
 def test_reset_gives_each_lane_an_independent_wind_draw() -> None:
@@ -263,25 +275,13 @@ def test_single_farm_step_honours_the_requested_control_mode() -> None:
     layout = FarmLayout(x=jnp.asarray([0.0, 504.0]), y=jnp.zeros(2))
     state, _ = reset(layout, jax.random.key(4))
     action = jnp.asarray([2.0, 0.0])
-    reward_fn = wfcrl_reward(0.1)
+    params = EnvParams(yaw_step=5.0, reward_fn=WfcrlReward(0.1), horizon=50)
 
     discrete_state, *_ = step(
-        layout,
-        state,
-        action,
-        yaw_step=5.0,
-        reward_fn=reward_fn,
-        horizon=50,
-        control_mode="discrete",
+        layout, state, action, replace(params, control_mode="discrete")
     )
     continuous_state, *_ = step(
-        layout,
-        state,
-        action,
-        yaw_step=5.0,
-        reward_fn=reward_fn,
-        horizon=50,
-        control_mode="continuous",
+        layout, state, action, replace(params, control_mode="continuous")
     )
     assert jnp.array_equal(discrete_state.yaw, jnp.asarray([5.0, -5.0]))
     assert jnp.array_equal(continuous_state.yaw, jnp.asarray([2.0, 0.0]))
@@ -341,12 +341,7 @@ def test_per_env_layouts_make_each_lane_solve_its_own_layout() -> None:
     _, reward, _ = env.step(actions)
     for i, lane_state in enumerate(lane_states):
         _, _, expected_reward, _ = step(
-            _lane_layout(layouts, i),
-            lane_state,
-            actions[i],
-            yaw_step=env.config.yaw_step,
-            reward_fn=env.reward_fn,
-            horizon=env.config.horizon,
+            _lane_layout(layouts, i), lane_state, actions[i], env.params
         )
         assert jnp.allclose(reward[i], expected_reward)
 

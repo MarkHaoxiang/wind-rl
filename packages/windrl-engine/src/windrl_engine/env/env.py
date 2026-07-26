@@ -1,5 +1,6 @@
 from collections.abc import Callable
-from typing import Final, NamedTuple, TypedDict, cast
+from dataclasses import dataclass
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -80,10 +81,14 @@ RewardFn = Callable[
 ]
 
 
-def wfcrl_reward(load_coef: float) -> RewardFn:
+@dataclass(frozen=True, slots=True)
+class WfcrlReward:
     """The WFCRL reward: mean normalized power minus ``load_coef`` times mean |load|."""
 
-    def reward_fn(
+    load_coef: float
+
+    def __call__(
+        self,
         powers_watts: Float[Array, "turbines"],
         loads: Float[Array, "turbines 4"],
         freestream_speed: Float[Array, ""],
@@ -91,21 +96,31 @@ def wfcrl_reward(load_coef: float) -> RewardFn:
         powers_mw = powers_watts / 1e6
         normalized = powers_mw * 1e3 / freestream_speed**3
         load_penalty = jnp.mean(jnp.abs(loads))
-        return jnp.mean(normalized) - load_coef * load_penalty
+        return jnp.mean(normalized) - self.load_coef * load_penalty
 
-    return reward_fn
+
+@dataclass(frozen=True, slots=True)
+class EnvParams:
+    """The env's compile-time knobs, passed as one jit-static argument.
+
+    Hashable and compared by value, so two envs configured alike share a
+    compiled step — which requires ``reward_fn`` to compare by value too (a
+    fresh closure per env forces a fresh trace).
+    """
+
+    yaw_step: float  # deg per unit action
+    reward_fn: RewardFn
+    horizon: int  # agent steps per episode, counting reset's burn-in step
+    control_mode: ControlMode = "continuous"
+    fidelity: Fidelity = "floris"
 
 
 def step(
     layout: FarmLayout,
     state: FarmState,
     action: Float[Array, "turbines"],
+    params: EnvParams,
     *,
-    yaw_step: float,
-    reward_fn: RewardFn,
-    horizon: int,
-    control_mode: ControlMode = "continuous",
-    fidelity: Fidelity = "floris",
     turbine: TurbineSpec = DEFAULT_TURBINE,
 ) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
     freestream_speed = state.wind.speed
@@ -114,12 +129,12 @@ def step(
         state.yaw_accumulator,
         state.step_count,
         action,
-        yaw_step=yaw_step,
-        control_mode=control_mode,
-        fidelity=fidelity,
+        yaw_step=params.yaw_step,
+        control_mode=params.control_mode,
+        fidelity=params.fidelity,
     )
     solution = solve_farm(
-        layout, state.wind, applied.yaw, fidelity=fidelity, turbine=turbine
+        layout, state.wind, applied.yaw, fidelity=params.fidelity, turbine=turbine
     )
     powers = turbine_powers(solution.u, applied.yaw, turbine=turbine)
     loads = load_proxies(solution)
@@ -132,8 +147,8 @@ def step(
         step_count=step_count,
     )
     obs = _observation(applied.yaw, state.wind, speed, direction)
-    reward = reward_fn(powers, loads, freestream_speed)
-    truncated = step_count == horizon
+    reward = params.reward_fn(powers, loads, freestream_speed)
+    truncated = step_count == params.horizon
     return new_state, obs, reward, truncated
 
 
@@ -168,27 +183,12 @@ def _batched_step(
     actions: Float[Array, "envs turbines"],
     key: Key[Array, ""],
     turbine: TurbineSpec,
-    *,
-    yaw_step: float,
-    reward_fn: RewardFn,
-    horizon: int,
-    control_mode: ControlMode,
-    fidelity: Fidelity,
+    params: EnvParams,
 ) -> _StepOut:
     def step_one_farm(
         layout: FarmLayout, state: FarmState, action: Float[Array, "turbines"]
     ) -> tuple[FarmState, Observation, Float[Array, ""], Bool[Array, ""]]:
-        return step(
-            layout,
-            state,
-            action,
-            yaw_step=yaw_step,
-            reward_fn=reward_fn,
-            horizon=horizon,
-            control_mode=control_mode,
-            fidelity=fidelity,
-            turbine=turbine,
-        )
+        return step(layout, state, action, params, turbine=turbine)
 
     new_state, obs, reward, truncated = jax.vmap(step_one_farm)(layout, state, actions)
     _, reset_key = jax.random.split(key)
@@ -201,7 +201,7 @@ def _batched_step(
         def reset_one_farm(
             layout: FarmLayout, key: Key[Array, ""]
         ) -> tuple[FarmState, Observation]:
-            return reset(layout, key, fidelity=fidelity, turbine=turbine)
+            return reset(layout, key, fidelity=params.fidelity, turbine=turbine)
 
         keys = jax.random.split(reset_key, truncated.shape[0])
         fresh_state, fresh_obs = jax.vmap(reset_one_farm)(layout, keys)
@@ -236,17 +236,6 @@ def _batched_reset(
     return jax.vmap(reset_one_farm)(layout, keys)
 
 
-_STEP_STATIC: Final = ("yaw_step", "reward_fn", "horizon", "control_mode", "fidelity")
-
-
-class _StepStatics(TypedDict):
-    yaw_step: float
-    reward_fn: RewardFn
-    horizon: int
-    control_mode: ControlMode
-    fidelity: Fidelity
-
-
 class EnvState(NamedTuple):
     """Everything ``step_fn`` needs to advance a batch of lanes, all leaves
     batched over a leading ``(envs,)`` axis.
@@ -258,6 +247,55 @@ class EnvState(NamedTuple):
 
     farm: FarmState
     layout: PerEnvLayouts
+
+
+def _scan_rollout(
+    state: EnvState,
+    obs: Observation,
+    key: Key[Array, ""],
+    turbine: TurbineSpec,
+    params: EnvParams,
+    *,
+    n_steps: int,
+    actor: Actor | None,
+) -> tuple[EnvState, Observation, Float[Array, "steps envs"]]:
+    idle = 1.0 if params.control_mode == "discrete" else 0.0
+    default_actions = jnp.full(state.layout.x.shape, idle)
+
+    Carry = tuple[EnvState, Observation, Key[Array, ""], Key[Array, ""]]
+
+    def advance_all_lanes(
+        carry: Carry, _step: None
+    ) -> tuple[Carry, Float[Array, "envs"]]:
+        state, obs, env_key, sample_key = carry
+        sample_key, action_key = jax.random.split(sample_key)
+        actions = default_actions if actor is None else actor(action_key, obs)
+        env_key, step_key = jax.random.split(env_key)
+        out = _batched_step(
+            state.layout, state.farm, actions, step_key, turbine, params
+        )
+        carry = (
+            EnvState(farm=out.state, layout=state.layout),
+            out.obs,
+            env_key,
+            sample_key,
+        )
+        return carry, out.reward
+
+    env_key, sample_key = jax.random.split(key)
+    (final_state, final_obs, _, _), rewards = jax.lax.scan(
+        advance_all_lanes, (state, obs, env_key, sample_key), None, length=n_steps
+    )
+    return final_state, final_obs, rewards
+
+
+# One cache per jitted function, keyed on EnvParams by value: identically
+# configured envs share their compiled step instead of retracing per instance.
+_batched_reset_jit = jax.jit(_batched_reset, static_argnames=("fidelity",))
+_batched_step_jit = jax.jit(_batched_step, static_argnames=("params",))
+_scan_rollout_jit = jax.jit(
+    _scan_rollout, static_argnames=("params", "n_steps", "actor")
+)
 
 
 class BatchedWindFarmEnv:
@@ -283,26 +321,16 @@ class BatchedWindFarmEnv:
         self.layout = config.build_layout()
         self.n_turbines = int(self.layout.x.shape[0])
         self.turbine = config.build_turbine()
-        self.reward_fn = (
-            wfcrl_reward(config.load_coef) if reward_fn is None else reward_fn
-        )
-        self._reset_jit = jax.jit(_batched_reset, static_argnames=("fidelity",))
-        self._step_jit = jax.jit(_batched_step, static_argnames=_STEP_STATIC)
-        self._rollout_jit = jax.jit(
-            self._scan_rollout, static_argnames=("n_steps", "actor")
+        self.params = EnvParams(
+            yaw_step=config.yaw_step,
+            reward_fn=WfcrlReward(config.load_coef) if reward_fn is None else reward_fn,
+            horizon=config.horizon,
+            control_mode=config.control_mode,
+            fidelity=config.fidelity,
         )
         self._state: EnvState | None = None
         self._obs: Observation | None = None
         self._key: Key[Array, ""] = jax.random.key(0)
-
-    def _step_kwargs(self) -> _StepStatics:
-        return {
-            "yaw_step": self.config.yaw_step,
-            "reward_fn": self.reward_fn,
-            "horizon": self.config.horizon,
-            "control_mode": self.config.control_mode,
-            "fidelity": self.config.fidelity,
-        }
 
     def reset_fn(
         self, key: Key[Array, ""], layouts: PerEnvLayouts | None = None
@@ -317,7 +345,9 @@ class BatchedWindFarmEnv:
         keys = jax.random.split(key, self.config.n_envs)
         farm, obs = cast(
             tuple[FarmState, Observation],
-            self._reset_jit(layout, keys, self.turbine, fidelity=self.config.fidelity),
+            _batched_reset_jit(
+                layout, keys, self.turbine, fidelity=self.params.fidelity
+            ),
         )
         return EnvState(farm=farm, layout=layout), obs
 
@@ -331,13 +361,8 @@ class BatchedWindFarmEnv:
         lanes hit their horizon; those lanes keep the layout held in ``state``."""
         out = cast(
             _StepOut,
-            self._step_jit(
-                state.layout,
-                state.farm,
-                actions,
-                key,
-                self.turbine,
-                **self._step_kwargs(),
+            _batched_step_jit(
+                state.layout, state.farm, actions, key, self.turbine, self.params
             ),
         )
         return (
@@ -408,42 +433,18 @@ class BatchedWindFarmEnv:
         self._key, scan_key = jax.random.split(self._key)
         state, obs, rewards = cast(
             tuple[EnvState, Observation, Float[Array, "steps envs"]],
-            self._rollout_jit(
-                self._state, self._obs, scan_key, n_steps=n_steps, actor=actor
+            _scan_rollout_jit(
+                self._state,
+                self._obs,
+                scan_key,
+                self.turbine,
+                self.params,
+                n_steps=n_steps,
+                actor=actor,
             ),
         )
         self._state, self._obs = state, obs
         return rewards
-
-    def _scan_rollout(
-        self,
-        state: EnvState,
-        obs: Observation,
-        key: Key[Array, ""],
-        *,
-        n_steps: int,
-        actor: Actor | None,
-    ) -> tuple[EnvState, Observation, Float[Array, "steps envs"]]:
-        idle = 1.0 if self.config.control_mode == "discrete" else 0.0
-        default_actions = jnp.full((self.config.n_envs, self.n_turbines), idle)
-
-        Carry = tuple[EnvState, Observation, Key[Array, ""], Key[Array, ""]]
-
-        def advance_all_lanes(
-            carry: Carry, _step: None
-        ) -> tuple[Carry, Float[Array, "envs"]]:
-            state, obs, env_key, sample_key = carry
-            sample_key, action_key = jax.random.split(sample_key)
-            actions = default_actions if actor is None else actor(action_key, obs)
-            env_key, step_key = jax.random.split(env_key)
-            state, obs, reward, _ = self.step_fn(state, actions, step_key)
-            return (state, obs, env_key, sample_key), reward
-
-        env_key, sample_key = jax.random.split(key)
-        (final_state, final_obs, _, _), rewards = jax.lax.scan(
-            advance_all_lanes, (state, obs, env_key, sample_key), None, length=n_steps
-        )
-        return final_state, final_obs, rewards
 
     def action_space(self) -> Box | MultiDiscrete:
         if self.config.control_mode == "continuous":
