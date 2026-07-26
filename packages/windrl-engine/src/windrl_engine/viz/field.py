@@ -11,11 +11,14 @@ from jaxtyping import Array, Float
 
 from windrl_engine.farm.layout import FarmLayout
 from windrl_engine.farm.wind import WindCondition
+from windrl_engine.physics.solver import Fidelity
 from windrl_engine.viz.plane import Extent, horizontal_slice, padded_extent
 from windrl_engine.viz.record import EpisodeRecord
 
 
-@functools.partial(jax.jit, static_argnames=("resolution", "height", "bounds"))
+@functools.partial(
+    jax.jit, static_argnames=("resolution", "height", "bounds", "fidelity")
+)
 def _hub_field(
     layout: FarmLayout,
     wind: WindCondition,
@@ -24,9 +27,16 @@ def _hub_field(
     resolution: tuple[int, int],
     height: float,
     bounds: Extent,
+    fidelity: Fidelity,
 ) -> Float[Array, "ny nx"]:
     field, _ = horizontal_slice(
-        layout, wind, yaw, height=height, bounds=bounds, resolution=resolution
+        layout,
+        wind,
+        yaw,
+        height=height,
+        bounds=bounds,
+        resolution=resolution,
+        fidelity=fidelity,
     )
     return field
 
@@ -54,6 +64,7 @@ class EpisodeFields:
         self._direction = jnp.asarray(record.wind_direction)
         self._resolution = resolution
         self._height = record.hub_height if height is None else height
+        self._fidelity = record.fidelity
         self._cache: dict[int, npt.NDArray[np.float32]] = {}
         self.extent: Extent = padded_extent(self._layout, record.rotor_diameter)
 
@@ -77,6 +88,7 @@ class EpisodeFields:
                 resolution=self._resolution,
                 height=self._height,
                 bounds=self.extent,
+                fidelity=self._fidelity,
             ),
         )
 

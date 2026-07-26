@@ -6,7 +6,7 @@ jaxtyping/beartype import hook that guards the single-farm core.
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -18,7 +18,7 @@ from windrl_engine.env.actions import YAW_LIMIT
 from windrl_engine.env.env import BatchedWindFarmEnv, Observation
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
-from windrl_engine.physics.solver import solve_farm
+from windrl_engine.physics.solver import Fidelity, solve_farm
 
 RecordActor = Callable[[Key[Array, ""], Observation], Float[Array, "envs turbines"]]
 
@@ -37,6 +37,7 @@ class EpisodeRecord(NamedTuple):
     rotor_diameter: float
     yaw_limit: float
     seconds_per_step: float
+    fidelity: Fidelity  # the wake model the recorded rewards were computed under
 
     yaw: npt.NDArray[np.float32]  # (frames, turbines) absolute deg
     action: npt.NDArray[np.float32]  # (frames, turbines) raw delta command
@@ -58,6 +59,7 @@ def _frame_powers(
 ) -> Float[Array, "frames turbines"]:
     layout = env.layout
     turbine = env.turbine
+    fidelity = env.config.fidelity
 
     def one_frame(
         speed: Float[Array, ""],
@@ -65,7 +67,9 @@ def _frame_powers(
         frame_yaw: Float[Array, "turbines"],
     ) -> Float[Array, "turbines"]:
         wind = WindCondition(speed=speed, direction=direction)
-        solution = solve_farm(layout, wind, frame_yaw, turbine=turbine)
+        solution = solve_farm(
+            layout, wind, frame_yaw, fidelity=fidelity, turbine=turbine
+        )
         return turbine_powers(solution.u, frame_yaw, turbine=turbine)
 
     return jax.vmap(one_frame)(wind_speed, wind_direction, yaw)
@@ -128,6 +132,7 @@ def record_episode(
         rotor_diameter=float(env.turbine.rotor_diameter),
         yaw_limit=float(YAW_LIMIT),
         seconds_per_step=60.0,  # env.actions.DT: FLORIS interface timestep
+        fidelity=env.config.fidelity,
         yaw=np.asarray(yaw, dtype=np.float32),
         action=np.asarray(jnp.stack(action_frames), dtype=np.float32),
         power=np.asarray(power, dtype=np.float32),
@@ -170,6 +175,11 @@ def load_record(path: str | Path) -> EpisodeRecord:
             rotor_diameter=float(data["rotor_diameter"]),
             yaw_limit=float(data["yaw_limit"]),
             seconds_per_step=float(data["seconds_per_step"]),
+            # records written before fidelity was captured predate any
+            # "corrected" env, so they are all reference-fidelity runs.
+            fidelity=cast(Fidelity, str(data["fidelity"]))
+            if "fidelity" in data
+            else "floris",
             yaw=data["yaw"],
             action=data["action"],
             power=data["power"],

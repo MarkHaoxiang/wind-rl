@@ -5,10 +5,15 @@ import threading
 from urllib.request import urlopen
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 
+from windrl_engine.env.actions import Fidelity
 from windrl_engine.env.config import WindFarmEnvConfig
 from windrl_engine.env.env import BatchedWindFarmEnv
+from windrl_engine.farm.wind import WindCondition
+from windrl_engine.physics.power import turbine_powers
+from windrl_engine.physics.solver import solve_farm
 from windrl_engine.viz.field import EpisodeFields
 from windrl_engine.viz.record import (
     EpisodeRecord,
@@ -20,8 +25,10 @@ from windrl_engine.viz.record import (
 from windrl_engine.viz.server import field_bytes, meta_payload, serve
 
 
-def _record(n_steps: int = 6) -> EpisodeRecord:
-    env = BatchedWindFarmEnv(WindFarmEnvConfig(layout="turb3_row1", n_envs=2))
+def _record(n_steps: int = 6, fidelity: Fidelity = "floris") -> EpisodeRecord:
+    env = BatchedWindFarmEnv(
+        WindFarmEnvConfig(layout="turb3_row1", n_envs=2, fidelity=fidelity)
+    )
     return record_episode(
         env, jax.random.key(0), n_steps, sweeping_actor(env.config.yaw_step)
     )
@@ -61,6 +68,41 @@ def test_save_load_round_trips_every_field_exactly(tmp_path) -> None:  # type: i
             assert original.dtype == restored.dtype
         else:
             assert original == restored
+
+
+def test_recorded_power_is_the_fidelity_the_env_was_rewarded_under() -> None:
+    # "floris" and "corrected" differ by ~6 kW/turbine here, so recomputing the
+    # frame powers at the wrong fidelity is visible far above float32 noise.
+    record = _record(fidelity="corrected")
+    env = BatchedWindFarmEnv(
+        WindFarmEnvConfig(layout="turb3_row1", n_envs=2, fidelity="corrected")
+    )
+    last = record.yaw.shape[0] - 1
+    wind = WindCondition(
+        speed=jnp.asarray(record.wind_speed[last]),
+        direction=jnp.asarray(record.wind_direction[last]),
+    )
+    yaw = jnp.asarray(record.yaw[last])
+
+    def powers_at(fidelity: Fidelity) -> np.ndarray:  # type: ignore[type-arg]
+        solution = solve_farm(
+            env.layout, wind, yaw, fidelity=fidelity, turbine=env.turbine
+        )
+        return np.asarray(turbine_powers(solution.u, yaw, turbine=env.turbine))
+
+    assert record.fidelity == "corrected"
+    np.testing.assert_allclose(record.power[last], powers_at("corrected"), rtol=1e-6)
+    assert np.abs(record.power[last] - powers_at("floris")).max() > 1e3
+
+
+def test_a_record_saved_without_a_fidelity_field_loads_as_the_reference_model(
+    tmp_path,  # type: ignore[no-untyped-def]
+) -> None:
+    record = _record()
+    path = tmp_path / "legacy.npz"
+    fields = {k: v for k, v in record._asdict().items() if k != "fidelity"}
+    np.savez(path, **fields)
+    assert load_record(path).fidelity == "floris"
 
 
 def test_field_is_finite_and_bounded_by_freestream() -> None:
