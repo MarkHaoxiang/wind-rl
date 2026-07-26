@@ -73,13 +73,33 @@ def project_feasible(
     # check, so the small overshoot is what makes convergence robust.
     target = site.min_spacing * (1.0 + tol)
 
+    # Deterministic per-index fallback direction for exactly-coincident pairs:
+    # points on a unit circle at index-derived angles are pairwise distinct for
+    # any i != j, so subtracting them gives a nonzero separating direction with
+    # no PRNG plumbing and no dependence on `coords` (hence a well-defined,
+    # zero, gradient through this branch).
+    angle = 2.0 * jnp.pi * jnp.arange(n_turbines) / n_turbines
+    fallback_point = jnp.stack([jnp.cos(angle), jnp.sin(angle)], axis=-1)  # (N, 2)
+    fallback_diff = fallback_point[:, None, :] - fallback_point[None, :, :]
+    fallback_norm = jnp.sqrt(jnp.sum(fallback_diff * fallback_diff, axis=-1))
+    fallback_safe_norm = jnp.where(fallback_norm > 0.0, fallback_norm, 1.0)
+    fallback_unit = fallback_diff / fallback_safe_norm[..., None]
+
     def relax_step(
         _: Array, coords: Float[Array, "turbines 2"]
     ) -> Float[Array, "turbines 2"]:
         diff = coords[:, None, :] - coords[None, :, :]  # (N, N, 2), pos_i - pos_j
-        dist = jnp.sqrt(jnp.sum(diff * diff, axis=-1))  # (N, N)
-        safe_dist = jnp.where(dist > 0.0, dist, 1.0)
-        unit = diff / safe_dist[..., None]  # separating direction, j -> i
+        sq_dist = jnp.sum(diff * diff, axis=-1)  # (N, N)
+        coincident = sq_dist == 0.0
+        # Double-where: guard sqrt's *input* (not just its output) so that
+        # d(sqrt)/dx at x=0 -- which is inf -- never enters the gradient graph.
+        dist = jnp.where(coincident, 0.0, jnp.sqrt(jnp.where(coincident, 1.0, sq_dist)))
+        safe_dist = jnp.where(coincident, 1.0, dist)
+        # At coincident points diff is 0 (no separating direction to divide
+        # out), so fall back to the deterministic per-index direction instead.
+        unit = jnp.where(
+            coincident[..., None], fallback_unit, diff / safe_dist[..., None]
+        )
         overlap = jnp.where(not_self & (dist < target), target - dist, 0.0)
         displacement = jnp.sum(unit * (0.5 * overlap)[..., None], axis=1)  # (N, 2)
         moved = coords + displacement

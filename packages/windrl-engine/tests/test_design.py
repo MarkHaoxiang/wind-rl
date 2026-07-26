@@ -80,6 +80,70 @@ def test_project_feasible_repairs_a_violating_cluster_within_bounds() -> None:
     assert float(_min_off_diagonal_distance(projected)) >= 500.0 - 1e-6
 
 
+def test_project_feasible_separates_an_exactly_coincident_pair() -> None:
+    site = make_site(2000.0, 2000.0, 500.0)
+    coords = jnp.asarray([[100.0, 100.0], [100.0, 100.0], [1500.0, 1500.0]])
+    assert not bool(min_spacing_satisfied(coords, site.min_spacing))
+
+    projected = project_feasible(coords, site)
+
+    assert bool(min_spacing_satisfied(projected, site.min_spacing))
+    assert bool(in_bounds(projected, site))
+
+
+def test_project_feasible_separates_an_exactly_coincident_quad() -> None:
+    site = make_site(3000.0, 3000.0, 400.0)
+    coords = jnp.full((4, 2), 500.0)
+    assert not bool(min_spacing_satisfied(coords, site.min_spacing))
+
+    projected = project_feasible(coords, site)
+
+    assert bool(min_spacing_satisfied(projected, site.min_spacing))
+    assert bool(in_bounds(projected, site))
+
+
+def test_project_feasible_gradient_is_finite_at_coincident_input() -> None:
+    site = make_site(2000.0, 2000.0, 500.0)
+    coords = jnp.asarray([[100.0, 100.0], [100.0, 100.0], [1500.0, 1500.0]])
+
+    grad = jax.grad(lambda c: jnp.sum(project_feasible(c, site)))(coords)
+
+    assert bool(jnp.all(jnp.isfinite(grad)))
+
+
+def test_random_uniform_reaches_full_feasibility_on_a_tight_but_satisfiable_site() -> (
+    None
+):
+    # Twice the density of the loose 4 km/250 m case above -- tight enough that
+    # a naive projection can leave residual violations, but still satisfiable.
+    site = make_site(4000.0, 4000.0, 500.0)
+    # Prove satisfiability by construction: an 8x4 grid at this spacing fits
+    # comfortably inside the box, so the site is not over-constrained.
+    xs, ys = jnp.meshgrid(jnp.arange(8) * 500.0, jnp.arange(4) * 500.0)
+    grid = jnp.stack([xs.ravel(), ys.ravel()], axis=-1)
+    assert grid.shape == (32, 2)
+    assert bool(min_spacing_satisfied(grid, site.min_spacing))
+    assert bool(in_bounds(grid, site))
+
+    batch = 256
+    layouts = random_uniform(site, 32)(jax.random.key(0), batch)
+    spacing_ok = jax.vmap(lambda c: min_spacing_satisfied(c, site.min_spacing))(layouts)
+    bounds_ok = jax.vmap(lambda c: in_bounds(c, site))(layouts)
+    assert bool(jnp.all(spacing_ok))
+    assert bool(jnp.all(bounds_ok))
+
+
+def test_project_feasible_is_a_noop_for_a_single_turbine() -> None:
+    site = make_site(2000.0, 2000.0, 500.0)
+    coords = jnp.asarray([[100.0, 100.0]])
+    assert bool(min_spacing_satisfied(coords, site.min_spacing))
+
+    projected = project_feasible(coords, site)
+
+    assert bool(jnp.array_equal(projected, coords))
+    assert bool(in_bounds(projected, site))
+
+
 def test_feasibility_predicates_agree_with_hand_computed_distances() -> None:
     # 3-4-5 right triangle: pairwise distances AB=3, AC=4, BC=5, so min = 3.
     coords = jnp.asarray([[0.0, 0.0], [3.0, 0.0], [0.0, 4.0]])
