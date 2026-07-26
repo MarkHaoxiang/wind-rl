@@ -19,7 +19,7 @@ import json
 import statistics
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 # x64 must be set before jax initializes arrays; do it from the dtype flag.
 _P = argparse.ArgumentParser()
@@ -41,7 +41,7 @@ jax.config.update("jax_enable_x64", _ARGS.dtype == "f64")
 
 import jax.numpy as jnp
 
-from windrl_engine.env.config import WindFarmEnvConfig
+from windrl_engine.env.config import LayoutName, WindFarmEnvConfig
 from windrl_engine.env.env import BatchedWindFarmEnv
 from windrl_engine.farm.layout import ablaincourt, horns_rev2, turb3_row1
 from windrl_engine.farm.wind import WindCondition, sample_wind
@@ -103,7 +103,11 @@ def bench_solver(layout_name: str, batch: int, repeats: int) -> dict[str, Any]:
 
 
 def bench_env_step(layout_name: str, batch: int, repeats: int) -> dict[str, Any]:
-    cfg = WindFarmEnvConfig(layout=layout_name, n_envs=batch, horizon=1000)
+    # layout_name is validated against _LAYOUTS' keys (== LayoutName's members)
+    # by the bench_solver dict lookup that runs alongside this in main().
+    cfg = WindFarmEnvConfig(
+        layout=cast(LayoutName, layout_name), n_envs=batch, horizon=1000
+    )
     env = BatchedWindFarmEnv(cfg)
     n = env.n_turbines
     env.reset(jax.random.key(0))
