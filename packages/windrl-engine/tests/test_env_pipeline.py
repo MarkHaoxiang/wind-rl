@@ -21,7 +21,10 @@ from windrl_engine.env.env import (
     step,
     wfcrl_reward,
 )
-from windrl_engine.farm.layout import ablaincourt, row_layout
+from windrl_engine.farm.layout import ablaincourt, row_layout, turb3_row1
+from windrl_engine.farm.wind import WindCondition
+from windrl_engine.physics.power import load_proxies, turbine_powers
+from windrl_engine.physics.solver import solve_farm
 
 
 def test_action_pipeline_constants_match_wfcrl_defaults() -> None:
@@ -197,3 +200,24 @@ def test_build_layout_resolves_a_named_layout_string_to_its_builder() -> None:
     expected = ablaincourt()
     assert jnp.array_equal(layout.x, expected.x)
     assert jnp.array_equal(layout.y, expected.y)
+
+
+def test_wfcrl_reward_is_mean_kw_per_cubed_freestream_minus_the_load_penalty() -> None:
+    # Pinned against a hand calculation on a real solve, because the reward's
+    # units are not recoverable from the code: powers arrive in W and are scaled
+    # by 1e-6 then 1e3, i.e. kW, before the /speed^3 normalization. Both terms
+    # must be checked -- the load penalty is a flat mean over all four proxies
+    # (TI and the three velocity stds), not a per-turbine norm.
+    layout = turb3_row1()
+    wind = WindCondition(speed=jnp.asarray(9.0), direction=jnp.asarray(270.0))
+    yaw = jnp.asarray([10.0, -5.0, 0.0])
+
+    solution = solve_farm(layout, wind, yaw)
+    powers = turbine_powers(solution.u, yaw)
+    loads = load_proxies(solution)
+
+    unpenalized = jnp.mean(powers / 1e3) / wind.speed**3
+    assert float(wfcrl_reward(0.0)(powers, loads, wind.speed)) == float(unpenalized)
+
+    penalized = unpenalized - 0.1 * jnp.mean(jnp.abs(loads))
+    assert float(wfcrl_reward(0.1)(powers, loads, wind.speed)) == float(penalized)
