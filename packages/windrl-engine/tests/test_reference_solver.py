@@ -31,6 +31,23 @@ CASES: list[tuple[str, Callable[[], FarmLayout], float, float, list[float]]] = [
     ("row3_270_8_flat", turb3_row1, 270.0, 8.0, [0.0, 0.0, 0.0]),
     ("row3_270_8_yaw", turb3_row1, 270.0, 8.0, [20.0, -15.0, 10.0]),
     ("ablaincourt_240_10_flat", ablaincourt, 240.0, 10.0, [0.0] * 7),
+    # Power-curve corners the 8-10 m/s cases never reach: below cut-in the two
+    # waked turbines produce exactly 0 W; at 4 m/s the row is non-monotone
+    # (turbine 1 dead, turbine 2 recovered to ~42 kW by wake-added mixing); at
+    # 15 m/s the front two sit exactly on the 5 MW rated plateau.
+    ("row3_270_3_below_cutin", turb3_row1, 270.0, 3.0, [0.0, 0.0, 0.0]),
+    ("row3_270_4_partial_cutin", turb3_row1, 270.0, 4.0, [0.0, 0.0, 0.0]),
+    ("row3_270_15_rated", turb3_row1, 270.0, 15.0, [0.0, 0.0, 0.0]),
+    # Yawed *and* non-axis-aligned: every turbine deflects a wake, and no rotor
+    # plane shares a wind-frame x with another, so the deflection/secondary-
+    # steering path is exercised off the degenerate 270 deg geometry.
+    (
+        "ablaincourt_313_9_yaw",
+        ablaincourt,
+        313.0,
+        9.0,
+        [10.0, -20.0, 5.0, 0.0, -8.0, 15.0, -3.0],
+    ),
 ]
 
 
@@ -100,6 +117,25 @@ def test_flow_ti_and_power_match_floris(
 
     powers = turbine_powers(solution.u, yaw_arr, turbine=turbine)
     np.testing.assert_allclose(np.asarray(powers), reference["powers"], rtol=RTOL)
+
+
+def test_power_curve_corner_cases_sit_on_the_corners_they_were_chosen_for(
+    floris_reference: dict[str, dict[str, npt.NDArray[np.float64]]],
+) -> None:
+    # The corner cases only test the cut-in/rated clamps while the geometry keeps
+    # putting them there; pin the corner so a re-tuned CASES entry that quietly
+    # slides back into the smooth part of the power curve fails loudly.
+    below_cutin = floris_reference["row3_270_3_below_cutin"]["powers"]
+    assert below_cutin[0] > 0.0
+    assert np.array_equal(below_cutin[1:], np.zeros(2))
+
+    partial = floris_reference["row3_270_4_partial_cutin"]["powers"]
+    assert partial[1] == 0.0
+    assert partial[2] > 0.0  # wake-added mixing recovers turbine 2 past cut-in
+
+    rated = floris_reference["row3_270_15_rated"]["powers"]
+    assert np.array_equal(rated[:2], np.full(2, 5.0e6))
+    assert rated[2] < 5.0e6
 
 
 def test_row3_270_8_zeroyaw_regression_anchor(
