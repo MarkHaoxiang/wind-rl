@@ -41,8 +41,8 @@ jax.config.update("jax_enable_x64", _ARGS.dtype == "f64")
 
 import jax.numpy as jnp
 
+from windrl_engine.env.batched import BatchedWindFarmEnv
 from windrl_engine.env.config import LayoutName, WindFarmEnvConfig
-from windrl_engine.env.env import BatchedWindFarmEnv
 from windrl_engine.farm.layout import ablaincourt, horns_rev2, turb3_row1
 from windrl_engine.farm.wind import WindCondition, sample_wind
 from windrl_engine.physics.power import turbine_powers

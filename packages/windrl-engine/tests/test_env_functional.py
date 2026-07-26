@@ -6,8 +6,8 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from windrl_engine.env.batched import BatchedWindFarmEnv, EnvState
 from windrl_engine.env.config import WindFarmEnvConfig
-from windrl_engine.env.env import BatchedWindFarmEnv, EnvState
 from windrl_engine.farm.layout import FarmLayout
 
 _LAYOUT = [(0.0, 0.0), (504.0, 0.0), (1008.0, 0.0)]

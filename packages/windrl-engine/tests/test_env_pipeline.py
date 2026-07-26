@@ -12,19 +12,16 @@ from windrl_engine.env.actions import (
     command_from_action,
     duty_cycle_limiter,
 )
+from windrl_engine.env.batched import BatchedWindFarmEnv
 from windrl_engine.env.config import WindFarmEnvConfig
-from windrl_engine.env.env import (
+from windrl_engine.env.reward import WfcrlReward
+from windrl_engine.env.single_farm import EnvParams, Observation, reset, step
+from windrl_engine.farm.layout import ablaincourt, row_layout, turb3_row1
+from windrl_engine.farm.wind import (
     WIND_DIRECTION_MAX,
     WIND_SPEED_MAX,
-    BatchedWindFarmEnv,
-    EnvParams,
-    Observation,
-    WfcrlReward,
-    reset,
-    step,
+    WindCondition,
 )
-from windrl_engine.farm.layout import ablaincourt, row_layout, turb3_row1
-from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import load_proxies, turbine_powers
 from windrl_engine.physics.solver import solve_farm
 

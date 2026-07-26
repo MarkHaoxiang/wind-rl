@@ -6,16 +6,10 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from windrl_engine.env.batched import BatchedWindFarmEnv, _batched_step_jit
 from windrl_engine.env.config import WindFarmEnvConfig
-from windrl_engine.env.env import (
-    BatchedWindFarmEnv,
-    EnvParams,
-    Observation,
-    WfcrlReward,
-    _batched_step_jit,
-    reset,
-    step,
-)
+from windrl_engine.env.reward import WfcrlReward
+from windrl_engine.env.single_farm import EnvParams, Observation, reset, step
 from windrl_engine.env.spaces import Box, MultiDiscrete
 from windrl_engine.farm.layout import FarmLayout
 

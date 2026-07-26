@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 
 from windrl_engine.env.actions import Fidelity
+from windrl_engine.env.batched import BatchedWindFarmEnv
 from windrl_engine.env.config import WindFarmEnvConfig
-from windrl_engine.env.env import BatchedWindFarmEnv
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import solve_farm

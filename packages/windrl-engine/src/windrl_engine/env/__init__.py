@@ -5,23 +5,18 @@ from windrl_engine.env.actions import (
     command_from_action,
     duty_cycle_limiter,
 )
-from windrl_engine.env.config import WindFarmEnvConfig
-from windrl_engine.env.env import (
+from windrl_engine.env.batched import (
     Actor,
     BatchedStepOut,
     BatchedWindFarmEnv,
-    EnvParams,
     EnvState,
-    Observation,
-    RewardFn,
     StepExtras,
-    StepOut,
-    WfcrlReward,
     batched_reset,
     batched_step,
-    reset,
-    step,
 )
+from windrl_engine.env.config import WindFarmEnvConfig
+from windrl_engine.env.reward import RewardFn, WfcrlReward
+from windrl_engine.env.single_farm import EnvParams, Observation, StepOut, reset, step
 from windrl_engine.env.spaces import Box, MultiDiscrete
 
 __all__ = [

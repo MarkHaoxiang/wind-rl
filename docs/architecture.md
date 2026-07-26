@@ -38,11 +38,12 @@ from lower ones.
   solution onto arbitrary query points (the full-flow field pass).
 - `env/`: WFCRL-compatible MARL env (delta-yaw actions, duty-cycle limiter,
   reward) — `spaces.py`, `actions.py`, `config.py` (`WindFarmEnvConfig`),
-  `env.py` (`BatchedWindFarmEnv` with per-env layouts and auto-reset, wrapping
-  the pure `lax.scan`-safe `batched_reset`/`batched_step` over an `EnvState`;
-  every static knob rides in one hashable `EnvParams`, whose `reward_fn`
-  defaults to `WfcrlReward`, and each step also returns the pre-auto-reset
-  observation and per-turbine powers as `StepExtras`).
+  `reward.py` (`RewardFn` and the default `WfcrlReward`), `single_farm.py`
+  (one farm's `reset`/`step`, its `Observation`, and the hashable `EnvParams`
+  every static knob rides in), `batched.py` (`BatchedWindFarmEnv` with per-env
+  layouts and auto-reset, wrapping the pure `lax.scan`-safe
+  `batched_reset`/`batched_step` over an `EnvState`; each step also returns the
+  pre-auto-reset observation and per-turbine powers as `StepExtras`).
 - `design/`: `Designer`, a `@runtime_checkable` `Protocol` for a pure
   `(key, batch) -> layouts` callable, `SiteSpec`, `project_feasible`
   min-spacing projection, and the `fixed`/`random_uniform` designers.

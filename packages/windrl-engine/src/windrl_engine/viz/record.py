@@ -15,7 +15,8 @@ import numpy.typing as npt
 from jaxtyping import Array, Float, Key
 
 from windrl_engine.env.actions import YAW_LIMIT
-from windrl_engine.env.env import BatchedWindFarmEnv, Observation
+from windrl_engine.env.batched import BatchedWindFarmEnv
+from windrl_engine.env.single_farm import Observation
 from windrl_engine.farm.wind import WindCondition
 from windrl_engine.physics.power import turbine_powers
 from windrl_engine.physics.solver import Fidelity, solve_farm
