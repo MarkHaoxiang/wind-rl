@@ -7,6 +7,7 @@ from urllib.request import urlopen
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from windrl_engine.env.actions import Fidelity
 from windrl_engine.env.config import WindFarmEnvConfig
@@ -34,8 +35,22 @@ def _record(n_steps: int = 6, fidelity: Fidelity = "floris") -> EpisodeRecord:
     )
 
 
-def test_record_has_frame_per_step_plus_reset_with_matching_shapes() -> None:
-    record = _record(n_steps=6)
+# Recording an episode dominates this module's runtime (env construction plus a
+# jitted rollout); EpisodeRecord is an immutable NamedTuple of numpy arrays that
+# no test writes to, so one 7-frame episode serves every test that only reads it.
+@pytest.fixture(scope="module")
+def record() -> EpisodeRecord:
+    return _record()
+
+
+@pytest.fixture(scope="module")
+def corrected_record() -> EpisodeRecord:
+    return _record(fidelity="corrected")
+
+
+def test_record_has_frame_per_step_plus_reset_with_matching_shapes(
+    record: EpisodeRecord,
+) -> None:
     frames, turbines = 7, 3
     assert record.yaw.shape == (frames, turbines)
     assert record.power.shape == (frames, turbines)
@@ -49,14 +64,15 @@ def test_record_has_frame_per_step_plus_reset_with_matching_shapes() -> None:
     assert np.all(record.power >= 0.0)
 
 
-def test_sweeping_actor_visibly_moves_yaw_off_zero() -> None:
-    record = _record(n_steps=8)
-    # frame 0 is the zero-yaw reset; the outer turbines must ramp away from it.
+def test_sweeping_actor_visibly_moves_yaw_off_zero(record: EpisodeRecord) -> None:
+    # frame 0 is the zero-yaw reset; the outer turbines must ramp away from it
+    # (duty-limited to a move every other step, so 6 steps reach +/-15 deg).
     assert float(np.abs(record.yaw[-1]).max()) > 10.0
 
 
-def test_save_load_round_trips_every_field_exactly(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    record = _record()
+def test_save_load_round_trips_every_field_exactly(
+    record: EpisodeRecord, tmp_path
+) -> None:  # type: ignore[no-untyped-def]
     path = tmp_path / "episode.npz"
     save_record(record, path)
     loaded = load_record(path)
@@ -70,10 +86,12 @@ def test_save_load_round_trips_every_field_exactly(tmp_path) -> None:  # type: i
             assert original == restored
 
 
-def test_recorded_power_is_the_fidelity_the_env_was_rewarded_under() -> None:
+def test_recorded_power_is_the_fidelity_the_env_was_rewarded_under(
+    corrected_record: EpisodeRecord,
+) -> None:
     # "floris" and "corrected" differ by ~6 kW/turbine here, so recomputing the
     # frame powers at the wrong fidelity is visible far above float32 noise.
-    record = _record(fidelity="corrected")
+    record = corrected_record
     env = BatchedWindFarmEnv(
         WindFarmEnvConfig(layout="turb3_row1", n_envs=2, fidelity="corrected")
     )
@@ -96,17 +114,16 @@ def test_recorded_power_is_the_fidelity_the_env_was_rewarded_under() -> None:
 
 
 def test_a_record_saved_without_a_fidelity_field_loads_as_the_reference_model(
+    record: EpisodeRecord,
     tmp_path,  # type: ignore[no-untyped-def]
 ) -> None:
-    record = _record()
     path = tmp_path / "legacy.npz"
     fields = {k: v for k, v in record._asdict().items() if k != "fidelity"}
     np.savez(path, **fields)
     assert load_record(path).fidelity == "floris"
 
 
-def test_field_is_finite_and_bounded_by_freestream() -> None:
-    record = _record()
+def test_field_is_finite_and_bounded_by_freestream(record: EpisodeRecord) -> None:
     fields = EpisodeFields(record, resolution=(48, 48))
     field = fields.field_at(2)
     assert field.shape == (48, 48)
@@ -117,8 +134,8 @@ def test_field_is_finite_and_bounded_by_freestream() -> None:
     assert field.max() <= freestream + 1e-3
 
 
-def test_field_cache_returns_the_identical_array() -> None:
-    fields = EpisodeFields(_record(), resolution=(32, 32))
+def test_field_cache_returns_the_identical_array(record: EpisodeRecord) -> None:
+    fields = EpisodeFields(record, resolution=(32, 32))
     assert fields.field_at(1) is fields.field_at(1)
 
 
@@ -133,8 +150,7 @@ def test_field_cache_evicts_the_least_recent_frame_once_full() -> None:
     assert fields.field_at(CACHED_FRAMES) is fields.field_at(CACHED_FRAMES)
 
 
-def test_meta_payload_omits_fields_unused_by_the_viewer() -> None:
-    record = _record()
+def test_meta_payload_omits_fields_unused_by_the_viewer(record: EpisodeRecord) -> None:
     fields = EpisodeFields(record, resolution=(32, 32))
     payload = meta_payload(record, fields)
     round_tripped = json.loads(json.dumps(payload))
@@ -167,8 +183,7 @@ def test_meta_payload_omits_fields_unused_by_the_viewer() -> None:
     }
 
 
-def test_field_bytes_decode_to_the_field_shape() -> None:
-    record = _record()
+def test_field_bytes_decode_to_the_field_shape(record: EpisodeRecord) -> None:
     fields = EpisodeFields(record, resolution=(40, 50))
     ny, nx = fields.shape
     assert (ny, nx) == (50, 40)
@@ -178,8 +193,7 @@ def test_field_bytes_decode_to_the_field_shape() -> None:
     assert np.array_equal(decoded.reshape(ny, nx), fields.field_at(3))
 
 
-def test_live_server_serves_page_meta_and_field_frames() -> None:
-    record = _record()
+def test_live_server_serves_page_meta_and_field_frames(record: EpisodeRecord) -> None:
     server = serve(record, port=0, resolution=(32, 32))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
