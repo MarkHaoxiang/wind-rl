@@ -1,15 +1,18 @@
-"""Install jaxtyping/beartype runtime shape checks for the farm/physics single-farm core.
+"""Install jaxtyping/beartype runtime shape checks across the engine.
 
-The un-batched shape aliases (``"turbines"``, ``"turbines grid grid"``, ...) on
-``farm/*`` and ``physics/*`` become *checked* for the test run -- every call and
-every ``jax.jit`` trace verifies shapes and dtypes -- at zero cost to the
-shipped package (the hook only exists in the test session). It must be
-installed before those modules are first imported, so this lives in the
+The shape aliases (``"turbines"``, ``"turbines grid grid"``, ``"envs
+turbines"``, ...) on the hooked modules become *checked* for the test run --
+every call and every ``jax.jit`` trace verifies shapes and dtypes -- at zero
+cost to the shipped package (the hook only exists in the test session). It must
+be installed before those modules are first imported, so this lives in the
 top-level conftest, which pytest loads before any test module.
 
-``env`` is excluded: it executes the same un-batched aliases batched under
-``vmap`` (``BatchedWindFarmEnv``), which needs a separate batched ->
-single-farm re-annotation pass first.
+Coverage is every module of ``farm/``, ``physics/``, ``design/`` and ``env/``,
+plus ``metrics.py``, ``viz/plane.py`` and ``viz/record.py``. Two engine modules
+are excluded: ``viz/field.py``, whose ``npt.NDArray[np.float32]`` returns
+beartype rejects outright at decoration time
+(``BeartypeDecorHintNonpepNumpyException``), and ``viz/server.py``, which
+annotates no arrays at all.
 """
 
 import jax
@@ -40,6 +43,14 @@ install_import_hook(
         "windrl_engine.design.designers",
         "windrl_engine.design.feasibility",
         "windrl_engine.metrics",
+        "windrl_engine.env.spaces",
+        "windrl_engine.env.actions",
+        "windrl_engine.env.config",
+        "windrl_engine.env.reward",
+        "windrl_engine.env.single_farm",
+        "windrl_engine.env.batched",
+        "windrl_engine.viz.plane",
+        "windrl_engine.viz.record",
     ],
     "beartype.beartype",
 )

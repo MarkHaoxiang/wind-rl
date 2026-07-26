@@ -1,8 +1,4 @@
-"""Record one env of a batch into a replayable ``EpisodeRecord``.
-
-Numpy-facing (host arrays, ``.npz`` persistence), so it stays outside the
-jaxtyping/beartype import hook that guards the single-farm core.
-"""
+"""Record one env of a batch into a replayable ``EpisodeRecord``."""
 
 from collections.abc import Callable
 from pathlib import Path

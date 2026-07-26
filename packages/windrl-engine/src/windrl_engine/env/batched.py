@@ -1,8 +1,8 @@
 """A batch of farms stepped jointly: the single-farm core under ``jit(vmap)``.
 
-Every array here carries a leading ``(envs,)`` axis, so the un-batched
-``single_farm`` shape annotations do not apply and this module stays outside
-the jaxtyping/beartype import hook.
+Every array here carries a leading ``(envs,)`` axis, so the shape aliases are
+the batched ones; the un-batched ``single_farm`` aliases apply only inside the
+vmapped inner functions.
 """
 
 from collections.abc import Callable

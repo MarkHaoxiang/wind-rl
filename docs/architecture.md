@@ -55,8 +55,9 @@ from lower ones.
   bundled canvas viewer, run via `python -m windrl_engine.viz episode.npz`).
 - `tests/`: live parity against FLORIS 4.6.6, physics invariants, and a
   beartype import hook that runtime-checks jaxtyping shape annotations across
-  `farm/`, `physics/`, `design/` and `metrics.py` (`env` batches those same
-  un-batched aliases under `vmap` and is excluded).
+  `farm/`, `physics/`, `design/`, `env/`, `metrics.py`, `viz/plane.py` and
+  `viz/record.py` (only `viz/field.py`, which beartype cannot decorate, and the
+  array-free `viz/server.py` are excluded).
 
 ## `windrl-train`
 
