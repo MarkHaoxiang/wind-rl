@@ -2,7 +2,7 @@
 
 import importlib.util
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple, TypeAlias
 
 import jax.numpy as jnp
 import numpy as np
@@ -21,7 +21,7 @@ CT_MAX: Final = 0.9999
 if TYPE_CHECKING:
     # jaxtyping needs the bare `np.ndarray` class, off which mypy reads numpy's
     # `Any`-defaulted type parameters -- rejected by `disallow_any_explicit`.
-    TurbineTable = npt.NDArray[np.float64]
+    TurbineTable: TypeAlias = npt.NDArray[np.float64]
 else:
     TurbineTable = Float[np.ndarray, f"table={TABLE_SIZE}"]
 
