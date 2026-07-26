@@ -34,6 +34,16 @@ def test_invalid_config_raises_instead_of_silently_defaulting(
         WindFarmEnvConfig(**kwargs)
 
 
+def test_an_empty_explicit_layout_is_rejected_rather_than_deferred_to_the_solve() -> (
+    None
+):
+    # Without the bound, BatchedWindFarmEnv builds happily and publishes shape-(0,)
+    # observation and action spaces; the failure only appears at the first reset,
+    # as a bare "zero-size array to reduction operation min" from inside the solve.
+    with pytest.raises(ValidationError):
+        WindFarmEnvConfig(layout=[])
+
+
 def test_an_explicit_layout_becomes_the_coordinates_it_was_given() -> None:
     layout = WindFarmEnvConfig(layout=[(0.0, 10.0), (504.0, -10.0)]).build_layout()
     assert [float(x) for x in layout.x] == [0.0, 504.0]

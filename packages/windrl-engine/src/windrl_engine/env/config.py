@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Literal
+from typing import Annotated, Literal
 
 import jax.numpy as jnp
 from pydantic import BaseModel, ConfigDict, Field
@@ -38,7 +38,11 @@ class WindFarmEnvConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    layout: LayoutName | list[tuple[float, float]] = "turb3_row1"
+    # min_length: a 0-turbine farm builds and traces fine, then dies inside the
+    # wake solve on a zero-size reduction, far from the config that caused it.
+    layout: LayoutName | Annotated[list[tuple[float, float]], Field(min_length=1)] = (
+        "turb3_row1"
+    )
     yaw_step: float = Field(default=5.0, gt=0.0)
     control_mode: ControlMode = "continuous"
     fidelity: Fidelity = "floris"
