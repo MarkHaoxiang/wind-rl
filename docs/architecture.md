@@ -35,8 +35,10 @@ pure-functional (`NamedTuple` PyTrees, single-farm cores, batched via
   the reference's numerical quirks.
 - `env/`: WFCRL-compatible MARL env (delta-yaw actions, duty-cycle limiter,
   reward) — `spaces.py`, `actions.py`, `config.py` (`WindFarmEnvConfig`),
-  `env.py` (`BatchedWindFarmEnv` with per-env layouts and auto-reset; reward is
-  a dependency-injected `RewardFn`, defaulting to the `wfcrl_reward` factory).
+  `env.py` (`BatchedWindFarmEnv` with per-env layouts and auto-reset, exposing a
+  pure `lax.scan`-safe `EnvState`/`reset_fn`/`step_fn` API that the stateful
+  `reset`/`step`/`rollout` wrap; reward is a dependency-injected `RewardFn`,
+  defaulting to the `wfcrl_reward` factory).
 - `design/`: `Designer` type alias (a pure `(key, batch) -> layouts` callable,
   no `Protocol` — current designers are stateless closures), `SiteSpec`,
   `project_feasible` min-spacing projection, random/grid designers.

@@ -151,7 +151,7 @@ def test_lane_that_truncates_gets_a_fresh_reset_observation_on_the_same_call() -
     obs_before, _, truncated_before = env.step(actions)  # step_count 1 -> 2
     assert bool(jnp.all(~truncated_before))
     assert env._state is not None
-    assert jnp.array_equal(env._state.step_count, jnp.asarray([2, 2]))
+    assert jnp.array_equal(env._state.farm.step_count, jnp.asarray([2, 2]))
 
     key_before_reset_call = env._key
     obs_after, _, truncated_after = env.step(actions)  # step_count 2 -> 3 == horizon
@@ -165,7 +165,7 @@ def test_lane_that_truncates_gets_a_fresh_reset_observation_on_the_same_call() -
     expected = [reset(env.layout, k)[1] for k in lane_keys]
 
     assert env._state is not None
-    assert jnp.array_equal(env._state.step_count, jnp.asarray([1, 1]))
+    assert jnp.array_equal(env._state.farm.step_count, jnp.asarray([1, 1]))
     for i, expected_obs in enumerate(expected):
         assert jnp.array_equal(obs_after.yaw[i], expected_obs.yaw)
         assert jnp.array_equal(obs_after.freewind[i], expected_obs.freewind)
@@ -377,8 +377,9 @@ def test_per_env_layout_is_fixed_across_auto_reset_while_wind_resamples() -> Non
     # Wind was genuinely resampled, not carried from the truncated episode.
     assert not jnp.allclose(obs_after.freewind, obs_before.freewind)
     # The layout the env solves is unchanged by the auto-reset.
-    assert jnp.array_equal(env._active_layout.x, layouts.x)
-    assert jnp.array_equal(env._active_layout.y, layouts.y)
+    assert env._state is not None
+    assert jnp.array_equal(env._state.layout.x, layouts.x)
+    assert jnp.array_equal(env._state.layout.y, layouts.y)
 
 
 def test_per_env_layout_with_wrong_turbine_count_raises_eagerly() -> None:
