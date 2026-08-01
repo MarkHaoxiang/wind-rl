@@ -52,14 +52,16 @@ def test_transition_constructs_and_is_a_pytree() -> None:
     envs, agents = 2, 3
     transition = Transition(
         obs=jnp.zeros((envs, agents, NFEAT)),
+        pre_tanh_action=jnp.zeros((envs, agents)),
         action=jnp.zeros((envs, agents)),
         log_prob=jnp.zeros((envs, agents)),
         value=jnp.zeros((envs, agents)),
-        reward=jnp.zeros((envs,)),
-        done=jnp.zeros((envs,), dtype=bool),
+        next_value=jnp.zeros((envs, agents)),
+        reward=jnp.zeros((envs, agents)),
+        done=jnp.zeros((envs, agents), dtype=bool),
     )
     leaves = jax.tree.leaves(transition)
-    assert len(leaves) == 6
+    assert len(leaves) == 8
 
 
 def test_learner_state_constructs_and_is_a_pytree() -> None:
