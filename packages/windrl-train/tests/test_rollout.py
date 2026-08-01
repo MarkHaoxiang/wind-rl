@@ -7,7 +7,7 @@ from jaxtyping import Array, Float
 
 from windrl_engine.env import BatchedWindFarmEnv, WindFarmEnvConfig
 from windrl_train.algo.ppo.types import LearnerState, Transition
-from windrl_train.features import NFEAT
+from windrl_train.features import NFEAT, agent_features
 from windrl_train.nn import Actor, Critic
 
 # rollout.py is the owner's hand-written learning exercise; this file must
@@ -63,11 +63,13 @@ def test_rollout_shapes() -> None:
 
     n_turbines = env.n_turbines
     assert traj.obs.shape == (n_steps, N_ENVS, n_turbines, NFEAT)
+    assert traj.pre_tanh_action.shape == (n_steps, N_ENVS, n_turbines)
     assert traj.action.shape == (n_steps, N_ENVS, n_turbines)
     assert traj.log_prob.shape == (n_steps, N_ENVS, n_turbines)
     assert traj.value.shape == (n_steps, N_ENVS, n_turbines)
-    assert traj.reward.shape == (n_steps, N_ENVS)
-    assert traj.done.shape == (n_steps, N_ENVS)
+    assert traj.next_value.shape == (n_steps, N_ENVS, n_turbines)
+    assert traj.reward.shape == (n_steps, N_ENVS, n_turbines)
+    assert traj.done.shape == (n_steps, N_ENVS, n_turbines)
 
 
 def test_rollout_advances_learner_state() -> None:
@@ -117,6 +119,24 @@ def test_rollout_log_prob_matches_recompute() -> None:
         recomputed_value = state.critic(feats)
         assert jnp.allclose(recomputed_value, traj.value[t, lane], rtol=1e-3, atol=1e-4)
 
+        pre_tanh_action = traj.pre_tanh_action[t, lane]
+        recomputed_action = jnp.tanh(pre_tanh_action) * ACTION_SCALE
+        assert jnp.allclose(
+            traj.action[t, lane], recomputed_action, rtol=1e-3, atol=1e-4
+        )
+
+        dist = state.actor(feats)
+        forward_log_det = dist.bijector.forward_and_log_det(pre_tanh_action)[1]
+        recomputed_log_prob_from_pre_tanh = (
+            dist.distribution.log_prob(pre_tanh_action) - forward_log_det
+        )
+        assert jnp.allclose(
+            recomputed_log_prob_from_pre_tanh,
+            traj.log_prob[t, lane],
+            rtol=1e-3,
+            atol=1e-4,
+        )
+
 
 def test_rollout_crosses_autoreset() -> None:
     env = _env()
@@ -125,7 +145,7 @@ def test_rollout_crosses_autoreset() -> None:
 
     _, traj = rollout.collect_rollout(state, env, n_steps)
 
-    assert traj.done.shape == (n_steps, N_ENVS)
+    assert traj.done.shape == (n_steps, N_ENVS, env.n_turbines)
     # Every lane starts a fresh episode at reset, so truncation lands on the
     # same step index across the whole batch. The reset burn-in solve counts
     # as step 1 (WFCRL _num_iter semantics; see the engine's
@@ -135,6 +155,84 @@ def test_rollout_crosses_autoreset() -> None:
     other_steps = jnp.arange(n_steps) != truncation_step
     assert bool(jnp.all(traj.done[truncation_step]))
     assert not bool(jnp.any(traj.done[other_steps]))
+
+
+def test_rollout_truncation_next_value_is_pre_reset() -> None:
+    env = _env()
+    state = _learner_state(env)
+    n_steps = 12  # > horizon=8, so every lane truncates and auto-resets once
+
+    _, traj = rollout.collect_rollout(state, env, n_steps)
+
+    # extras.terminal_obs is the pre-reset final frame at a truncation step,
+    # not the fresh episode's first observation the buffer's next row holds.
+    truncation_step = HORIZON - 2
+    assert not bool(
+        jnp.allclose(
+            traj.next_value[truncation_step],
+            traj.value[truncation_step + 1],
+            rtol=1e-3,
+            atol=1e-4,
+        )
+    )
+
+
+def test_rollout_matches_manual_step() -> None:
+    env = _env()
+    state = _learner_state(env)
+    n_steps = 6
+
+    _, traj = rollout.collect_rollout(state, env, n_steps)
+
+    # Tolerances accommodate TF32 matmuls inside the compiled rollout scan on
+    # GPU vs this eager recompute (~1e-4 relative observed); a genuine
+    # misalignment is O(1), orders of magnitude larger.
+    manual_step_out = env.step_fn(state=state.env_state, actions=traj.action[0])
+    assert jnp.allclose(
+        manual_step_out.reward, traj.reward[0, :, 0], rtol=1e-3, atol=1e-4
+    )
+
+
+def test_rollout_next_value_matches_bootstrap() -> None:
+    env = _env()
+    state = _learner_state(env)
+    n_steps = 6  # last step (index 5) isn't the horizon - 2 truncation step
+
+    new_state, traj = rollout.collect_rollout(state, env, n_steps)
+
+    # Tolerances accommodate TF32 matmuls inside the compiled rollout scan on
+    # GPU vs this eager recompute (~1e-4 relative observed); a genuine
+    # misalignment is O(1), orders of magnitude larger.
+    bootstrap_value = state.critic(agent_features(new_state.obs))
+    assert jnp.allclose(bootstrap_value, traj.next_value[-1], rtol=1e-3, atol=1e-4)
+
+
+def test_rollout_pre_tanh_action_differs_across_steps() -> None:
+    env = _env()
+    state = _learner_state(env)
+    n_steps = 6
+
+    _, traj = rollout.collect_rollout(state, env, n_steps)
+
+    assert not bool(jnp.allclose(traj.pre_tanh_action[0], traj.pre_tanh_action[1]))
+
+
+def test_rollout_reward_broadcast_at_n_envs_eq_n_turbines() -> None:
+    env = BatchedWindFarmEnv(
+        WindFarmEnvConfig(layout="turb3_row1", n_envs=3, horizon=HORIZON)
+    )
+    state = _learner_state(env)
+    n_steps = 4
+
+    _, traj = rollout.collect_rollout(state, env, n_steps)
+
+    assert traj.reward.shape == (n_steps, 3, env.n_turbines)
+    assert bool(
+        jnp.all(
+            traj.reward == jnp.broadcast_to(traj.reward[..., :1], traj.reward.shape)
+        )
+    )
+    assert not bool(jnp.all(traj.reward[:, 0, 0] == traj.reward[:, 1, 0]))
 
 
 @eqx.filter_jit

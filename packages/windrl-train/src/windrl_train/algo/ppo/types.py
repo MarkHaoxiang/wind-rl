@@ -9,11 +9,13 @@ from windrl_train.nn import Actor, Critic
 
 class Transition(NamedTuple):
     obs: Float[Array, "envs agents feat"]
+    pre_tanh_action: Float[Array, "envs agents"]  # base Normal sample, pre Tanh/scale
     action: Float[Array, "envs agents"]
     log_prob: Float[Array, "envs agents"]
     value: Float[Array, "envs agents"]
-    reward: Float[Array, "envs"]  # shared cooperative reward
-    done: Bool[Array, "envs"]  # truncation (env auto-resets)
+    next_value: Float[Array, "envs agents"]  # critic on the true successor obs
+    reward: Float[Array, "envs agents"]  # cooperative reward, broadcast per agent
+    done: Bool[Array, "envs agents"]  # truncation (env auto-resets), per agent
 
 
 class LearnerState(NamedTuple):

@@ -17,26 +17,40 @@ def collect_rollout(
 
         # Select Action
         key, subkey = jax.random.split(state.key)
-        action_dist = state.actor(features)
-        raw_action, raw_log_prob = action_dist.sample_and_log_prob(seed=subkey)
+        dist = state.actor(features)
+        raw_pre_tanh_action = dist.distribution.sample(seed=subkey)
+        raw_action, raw_forward_log_det = dist.bijector.forward_and_log_det(
+            raw_pre_tanh_action
+        )
         # distrax annotates chex.Array (a union with np.ndarray); narrow to jax.Array
-        action, log_prob = jnp.asarray(raw_action), jnp.asarray(raw_log_prob)
+        pre_tanh_action = jnp.asarray(raw_pre_tanh_action)
+        action, forward_log_det = (
+            jnp.asarray(raw_action),
+            jnp.asarray(raw_forward_log_det),
+        )
+        log_prob = dist.distribution.log_prob(pre_tanh_action) - forward_log_det
 
         # Step Environment
         batched_step_out = env.step_fn(state=state.env_state, actions=action)
+        next_value = state.critic(agent_features(batched_step_out.extras.terminal_obs))
 
         # Update Learner State
         state_next = state.update_on_env_step(
             batched_step_out=batched_step_out, key=key
         )
 
+        reward = jnp.broadcast_to(batched_step_out.reward[:, None], value.shape)
+        done = jnp.broadcast_to(batched_step_out.truncated[:, None], value.shape)
+
         transition = Transition(
             obs=features,
+            pre_tanh_action=pre_tanh_action,
             action=action,
             log_prob=log_prob,
             value=value,
-            reward=batched_step_out.reward,
-            done=batched_step_out.truncated,
+            next_value=next_value,
+            reward=reward,
+            done=done,
         )
 
         return state_next, transition
