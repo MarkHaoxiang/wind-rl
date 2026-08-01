@@ -22,13 +22,17 @@ Binding for all code in `src/`, `tests/`, and `experiments/`.
 - Inline comments only where the code is surprising (workarounds, API churn,
   numerical subtleties) — and they state the reason, ideally with a reference.
 
-## Docstrings describe purpose, not history
+## Docs describe purpose and current state, not history
 
 - A docstring states what the abstraction is *for*, at the level of the
   abstraction itself — the role it plays for its caller, not how it is built.
 - Never cite design history: no decision numbers, plan/spec section references,
   upstream-project comparisons, or "this replaces X". Git history is the
   record; a docstring reader is a user, not a reviewer.
+- All documentation — docstrings, comments, `docs/*.md` — describes the code
+  as it exists now. Never the pattern "previously X, now Y": no "now uses",
+  "moved from", "no longer", "instead of the old". Edit docs in place to the
+  current reality; git history carries the transition.
 - Implementation specifics (algorithms, masking tricks, reference-parity
   subtleties) belong as inline comments next to the code they explain — and
   only where that code is surprising — never in the docstring.
